@@ -64,7 +64,9 @@ Fetch will:
 3. Ensure `simpleContentAccess=enabled` and export the manifest zip
 4. Write / refresh `automation-hub-token`
 
-By default the role reuses `allocation_name` when it exists, otherwise **creates** it (`create_allocation_if_missing: true`), enables SCA, and exports the manifest.
+By default the role reuses `allocation_name` when it exists, otherwise **creates** it (`create_allocation_if_missing: true`), enables SCA, ensures an AAP subscription is on the allocation if it is empty, and exports the manifest.
+
+**SCA note:** Simple Content Access means you do not attach subscriptions to *hosts*. The *allocation/manifest* still needs the AAP subscription on it (typically quantity 1) or the export is empty and useless for AAP — that is why a newly created `aap-local` showed zero subscriptions. The role adds that subscription automatically when the allocation has none.
 
 Creating a new allocation via `POST /allocations` on the RHSM management API often returns **HTTP 403**. Creation therefore prefers the Customer Portal path (`theforeman.foreman.redhat_manifest` with `content_access_mode: org_environment`), which needs `rh_username` / `rh_password` (same credentials as the web UI):
 
@@ -132,6 +134,10 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 | `reuse_existing_allocation` | `true` | Prefer existing allocations for download |
 | `create_allocation_if_missing` | `true` | Create `allocation_name` when it does not already exist |
 | `enable_simple_content_access` | `true` | PUT `simpleContentAccess=enabled` |
+| `add_aap_subscription` | `true` | Add AAP pool to empty SCA allocations before export |
+| `aap_pool_id` | unset | Explicit pool id (optional; auto-discovered) |
+| `aap_pool_name_regex` | `(?i)ansible.?automation.?platform` | Pool product name match |
+| `aap_pool_quantity` | `1` | Quantity to place on the allocation |
 | `manifest_backend` | `rhsm_api` | `rhsm_api` or `foreman` (`satellite_module` alias) |
 | `open_token_urls` | `true` | Open browser during interactive generate |
 | `foreman_validate_certs` | `false` | Portal TLS verify for theforeman backend |

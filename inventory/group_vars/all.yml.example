@@ -13,6 +13,9 @@ allocation_name: aap-local
 reuse_existing_allocation: true
 create_allocation_if_missing: true
 enable_simple_content_access: true
+add_aap_subscription: true
+# aap_pool_id: ""
+aap_pool_quantity: 1
 # rhsm_api (default) or foreman (theforeman.foreman.redhat_manifest)
 manifest_backend: rhsm_api
 # For manifest_backend=foreman also set:

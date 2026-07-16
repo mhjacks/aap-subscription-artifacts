@@ -1,0 +1,70 @@
+---
+# Resolve __aap_pool_id for adding an AAP subscription onto an SCA allocation.
+# SCA still requires subscriptions on the *allocation* (manifest); it only
+# removes attaching subscriptions to *hosts*.
+
+- name: Use explicit AAP pool id when provided
+  when: aap_pool_id | length > 0
+  ansible.builtin.set_fact:
+    __aap_pool_id: "{{ aap_pool_id }}"
+
+- name: Discover AAP pool id from allocation pools
+  when: aap_pool_id | length == 0
+  block:
+    - name: List pools available for allocation
+      ansible.builtin.uri:
+        url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/pools?limit=100"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        return_content: true
+      register: __allocation_pools
+      no_log: true
+
+    - name: Match AAP pools by productName or name
+      vars:
+        __pools: "{{ __allocation_pools.json.body | default([]) }}"
+      ansible.builtin.set_fact:
+        __matched_pools: >-
+          {{
+            __pools
+            | selectattr('productName', 'defined')
+            | selectattr('productName', 'match', aap_pool_name_regex)
+            | list
+            + (
+              __pools
+              | selectattr('name', 'defined')
+              | selectattr('name', 'match', aap_pool_name_regex)
+              | list
+            )
+          }}
+
+    - name: Resolve AAP pool id from matched pools
+      ansible.builtin.set_fact:
+        __aap_pool_id: >-
+          {{
+            (__matched_pools | first).id
+            | default((__matched_pools | first).poolId, true)
+            | default('', true)
+            if (__matched_pools | length > 0)
+            else ''
+          }}
+
+    - name: Show discovered AAP pool
+      when: __aap_pool_id | length > 0
+      ansible.builtin.debug:
+        msg: "Discovered AAP pool id {{ __aap_pool_id }} for allocation {{ __allocation_uuid }}"
+
+- name: Assert AAP pool id was resolved
+  ansible.builtin.assert:
+    that:
+      - __aap_pool_id is defined
+      - __aap_pool_id | length > 0
+    fail_msg: >-
+      No AAP subscription pool matched on allocation {{ __allocation_uuid }}.
+      An SCA allocation still needs the AAP subscription added to the allocation
+      before export (hosts do not need attach; the manifest does).
+      Set aap_pool_id or adjust aap_pool_name_regex ({{ aap_pool_name_regex }}).
+      Available product names:
+      {{ (__allocation_pools.json.body | default([])) | map(attribute='productName') | list
+         if (__allocation_pools is defined) else [] }}

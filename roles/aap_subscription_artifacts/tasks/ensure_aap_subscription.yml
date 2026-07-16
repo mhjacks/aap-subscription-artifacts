@@ -1,0 +1,88 @@
+---
+# Ensure the SCA allocation includes an AAP subscription (usually quantity 1).
+# SCA removes host-level attach; satellite/manifest allocations still need the
+# subscription on the allocation so the exported zip is useful for AAP.
+
+- name: Get allocation details including attached entitlements
+  ansible.builtin.uri:
+    url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}?include=entitlements"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ __rhsm_access_token }}"
+    return_content: true
+  register: __allocation_details
+  no_log: true
+
+- name: Collect attached entitlement summary
+  vars:
+    __ents: >-
+      {{
+        __allocation_details.json.body.entitlementsAttached.value
+        | default(__allocation_details.json.body.entitlementsAttached, true)
+        | default(__allocation_details.json.body.entitlements, true)
+        | default([], true)
+      }}
+  ansible.builtin.set_fact:
+    __attached_pool_ids: >-
+      {{
+        (__ents | map(attribute='poolId') | list)
+        + (__ents | map(attribute='pool') | list)
+        + (__ents | map(attribute='id') | list)
+      }}
+    __attached_entitlement_count: "{{ __ents | length }}"
+
+- name: Skip adding AAP subscription when allocation already has entitlements
+  when:
+    - not (force_add_aap_subscription | bool)
+    - (__attached_entitlement_count | int) > 0
+  ansible.builtin.debug:
+    msg: >-
+      Allocation {{ __allocation_uuid }} already has
+      {{ __attached_entitlement_count }} entitlement(s); not adding another
+      unless force_add_aap_subscription=true.
+
+- name: Add AAP subscription to empty SCA allocation
+  when: >-
+    (force_add_aap_subscription | bool)
+    or ((__attached_entitlement_count | int) == 0)
+  block:
+    - name: Resolve AAP pool id
+      ansible.builtin.include_tasks: resolve_aap_pool.yml
+
+    - name: Add AAP subscription via Customer Portal
+      when:
+        - rh_username is defined
+        - rh_username | length > 0
+        - rh_password is defined
+        - rh_password | length > 0
+      theforeman.foreman.redhat_manifest:
+        uuid: "{{ __allocation_uuid }}"
+        username: "{{ rh_username }}"
+        password: "{{ rh_password }}"
+        pool_id: "{{ __aap_pool_id }}"
+        quantity: "{{ aap_pool_quantity }}"
+        content_access_mode: org_environment
+        validate_certs: "{{ foreman_validate_certs }}"
+      no_log: true
+
+    - name: Add AAP subscription via RHSM API when portal credentials are absent
+      when: >-
+        rh_username is not defined
+        or (rh_username | length == 0)
+        or rh_password is not defined
+        or (rh_password | length == 0)
+      ansible.builtin.uri:
+        url: >-
+          {{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/entitlements?pool={{ __aap_pool_id | urlencode }}&quantity={{ aap_pool_quantity }}
+        method: POST
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        status_code: [200, 201]
+        return_content: true
+      no_log: true
+
+    - name: Note AAP subscription added
+      ansible.builtin.debug:
+        msg: >-
+          Added AAP subscription (pool {{ __aap_pool_id }}, qty {{ aap_pool_quantity }})
+          to SCA allocation {{ __allocation_uuid }}.

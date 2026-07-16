@@ -35,6 +35,10 @@
       "{{ __allocation_display_name | default(allocation_name) }}"
       ({{ __allocation_uuid }}).
 
+- name: Ensure AAP subscription is on the SCA allocation
+  ansible.builtin.include_tasks: ensure_aap_subscription.yml
+  when: add_aap_subscription | bool
+
 - name: Download allocation manifest via theforeman.foreman
   theforeman.foreman.redhat_manifest:
     uuid: "{{ __allocation_uuid }}"

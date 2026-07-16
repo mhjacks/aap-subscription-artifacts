@@ -35,8 +35,15 @@ allocation_version: ""
 reuse_existing_allocation: true
 # Create allocation_name when it does not already exist
 create_allocation_if_missing: true
-# Always enable SCA on the allocation (console-compatible; no pools)
+# Always enable SCA on the allocation (console-compatible)
 enable_simple_content_access: true
+# Add AAP subscription onto the SCA allocation when it has none (required for
+# a usable AAP manifest; SCA only skips attaching subscriptions to hosts)
+add_aap_subscription: true
+force_add_aap_subscription: false
+aap_pool_id: ""
+aap_pool_name_regex: "(?i)ansible.?automation.?platform"
+aap_pool_quantity: 1
 
 export_retries: 30
 export_delay: 10

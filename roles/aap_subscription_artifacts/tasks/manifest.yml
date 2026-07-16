@@ -13,6 +13,10 @@
       Using SCA allocation "{{ __allocation_display_name | default(allocation_name) }}"
       ({{ __allocation_uuid }}) for manifest export.
 
+- name: Ensure AAP subscription is on the SCA allocation
+  ansible.builtin.include_tasks: ensure_aap_subscription.yml
+  when: add_aap_subscription | bool
+
 - name: Trigger manifest export
   ansible.builtin.uri:
     url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/export"
