@@ -137,8 +137,8 @@
     body:
       simpleContentAccess: enabled
     status_code: [200, 204]
-    failed_when: false
   register: __sca_enable
+  failed_when: false
   no_log: true
 
 - name: Note Simple Content Access enable result
