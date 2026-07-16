@@ -13,10 +13,6 @@
       Using SCA allocation "{{ __allocation_display_name | default(allocation_name) }}"
       ({{ __allocation_uuid }}) for manifest export.
 
-- name: Ensure AAP subscription is on the allocation
-  ansible.builtin.include_tasks: ensure_aap_subscription.yml
-  when: add_aap_subscription | bool
-
 - name: Enable Simple Content Access
   ansible.builtin.include_tasks: enable_sca.yml
 

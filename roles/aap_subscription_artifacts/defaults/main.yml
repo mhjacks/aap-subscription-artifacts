@@ -2,7 +2,7 @@
 # Optional when {{ artifacts_dir }}/{{ offline_token_filename }} already exists
 # rh_offline_token: ""
 
-# Optional: password-grant generate attempt and/or foreman backend
+# Optional: password-grant generate; required to create allocations via portal
 # rh_username: ""
 # rh_password: ""
 
@@ -25,30 +25,16 @@ rhsm_token_url: https://access.redhat.com/management/api
 sso_token_url: https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token
 rhsm_api_base: https://api.access.redhat.com/management/v1
 
-# Allocation (SCA only — no pool attach)
+# SCA allocation only — no pool listing or attach
 allocation_name: aap-local
-# Optional explicit UUID (skips name matching when set)
 allocation_uuid: ""
-# Empty = pick latest version from /allocations/versions
 allocation_version: ""
-# Prefer an existing allocation for download when possible
 reuse_existing_allocation: true
-# Create allocation_name when it does not already exist
 create_allocation_if_missing: true
-# Always enable SCA on the allocation (console-compatible)
 enable_simple_content_access: true
-# Add AAP subscription onto the SCA allocation when it has none (required for
-# a usable AAP manifest; SCA only skips attaching subscriptions to hosts)
-add_aap_subscription: true
-force_add_aap_subscription: false
-aap_pool_id: ""
-aap_pool_name_regex: "(?i)ansible.?automation.?platform"
-aap_pool_quantity: 1
 
 export_retries: 30
 export_delay: 10
 
-# theforeman.foreman.redhat_manifest portal TLS. Default false: avoids needing
-# /etc/rhsm/ca/redhat-uep.pem (and modern OpenSSL rejects that CA anyway).
-# Prefer manifest_backend=rhsm_api for verified TLS via api.access.redhat.com.
+# Portal TLS for theforeman.foreman.redhat_manifest (false = no redhat-uep.pem)
 foreman_validate_certs: false
