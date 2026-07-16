@@ -28,6 +28,9 @@ rhsm_api_base: https://api.access.redhat.com/management/v1
 allocation_name: aap-local
 # Empty = pick latest version from /allocations/versions
 allocation_version: ""
+# When true, scan existing allocations for one that already has an AAP
+# subscription attached and export that instead of creating/attaching.
+reuse_existing_aap_allocation: true
 aap_pool_id: ""
 aap_pool_name_regex: "(?i)ansible.?automation.?platform"
 aap_pool_quantity: 1

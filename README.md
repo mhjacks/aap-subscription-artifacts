@@ -56,10 +56,12 @@ ansible-playbook playbooks/fetch_artifacts.yml \
 Fetch will:
 
 1. Exchange the offline token for an RHSM API access token
-2. Create (or reuse) allocation `aap-local`
-3. Attach an Ansible Automation Platform subscription pool (by id or name match)
-4. Export and download `aap-manifest.zip`
+2. Scan existing subscription allocations for one that already has an AAP subscription attached
+3. If found, export and download that manifest (prefers `allocation_name` when it is AAP-entitled)
+4. Otherwise create (or reuse by name) allocation `aap-local`, attach an AAP pool, then export
 5. Write / refresh `automation-hub-token`
+
+Set `reuse_existing_aap_allocation: false` to skip the scan and always use the named allocation create/attach path.
 
 ### One-shot (generate + fetch)
 
@@ -82,8 +84,9 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 | `rh_offline_token` | (file) | Offline token; falls back to `rh-offline-token` file |
 | `rh_username` / `rh_password` | unset | Password-grant generate attempt; required for `satellite_module` |
 | `artifacts_dir` | `~/Documents/aap-subscription-artifacts` | Output directory |
-| `allocation_name` | `aap-local` | Subscription allocation name |
+| `allocation_name` | `aap-local` | Preferred allocation name (create target / preference among AAP-entitled) |
 | `allocation_version` | latest from API | Satellite version for new allocations |
+| `reuse_existing_aap_allocation` | `true` | Reuse any existing allocation that already has AAP attached |
 | `aap_pool_id` | unset | Explicit pool id (skips name matching) |
 | `aap_pool_name_regex` | `(?i)ansible.?automation.?platform` | Pool product name match |
 | `aap_pool_quantity` | `1` | Quantity to attach |

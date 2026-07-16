@@ -1,4 +1,7 @@
 ---
+# Prefer an existing allocation that already has an AAP subscription attached.
+# Only create/attach when none is found.
+
 - name: List subscription allocations
   ansible.builtin.uri:
     url: "{{ rhsm_api_base }}/allocations?limit=100"
@@ -9,9 +12,107 @@
   register: __allocations_list
   no_log: true
 
-- name: Find existing allocation by name
+- name: Probe allocations for attached entitlements
+  when:
+    - reuse_existing_aap_allocation | bool
+    - (__allocations_list.json.body | default([]) | length) > 0
+  ansible.builtin.uri:
+    url: "{{ rhsm_api_base }}/allocations/{{ item.uuid }}?include=entitlements"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ __rhsm_access_token }}"
+    return_content: true
+  loop: "{{ __allocations_list.json.body | default([]) }}"
+  loop_control:
+    label: "{{ item.name | default(item.uuid) }}"
+  register: __allocation_probes
+  no_log: true
+
+- name: Initialize AAP-entitled allocation candidates
   ansible.builtin.set_fact:
-    __existing_allocation: >-
+    __aap_entitled_allocations: []
+    __reuse_existing_aap: false
+    __aap_already_attached: false
+
+- name: Collect allocations that already have an AAP subscription
+  when:
+    - reuse_existing_aap_allocation | bool
+    - __allocation_probes is defined
+    - __allocation_probes.results is defined
+  block:
+    - name: Add AAP-entitled allocation candidates
+      vars:
+        __ents: >-
+          {{
+            item.json.body.entitlementsAttached.value
+            | default(item.json.body.entitlementsAttached, true)
+            | default(item.json.body.entitlements, true)
+            | default([], true)
+          }}
+        __name_matches: >-
+          {{
+            __ents
+            | selectattr('productName', 'defined')
+            | selectattr('productName', 'match', aap_pool_name_regex)
+            | list
+            + (
+              __ents
+              | selectattr('name', 'defined')
+              | selectattr('name', 'match', aap_pool_name_regex)
+              | list
+            )
+            + (
+              __ents
+              | selectattr('poolName', 'defined')
+              | selectattr('poolName', 'match', aap_pool_name_regex)
+              | list
+            )
+          }}
+        __pool_id_matches: >-
+          {{
+            (
+              __ents
+              | selectattr('poolId', 'defined')
+              | selectattr('poolId', 'equalto', aap_pool_id)
+              | list
+            )
+            if (aap_pool_id | length > 0)
+            else []
+          }}
+      ansible.builtin.set_fact:
+        __aap_entitled_allocations: "{{ __aap_entitled_allocations + [item.json.body] }}"
+      loop: "{{ __allocation_probes.results }}"
+      loop_control:
+        label: "{{ item.json.body.name | default(item.item.uuid | default('unknown')) }}"
+      when:
+        - item is not skipped
+        - item is not failed
+        - item.json is defined
+        - item.json.body is defined
+        - (__name_matches | length > 0) or (__pool_id_matches | length > 0)
+
+- name: Prefer named allocation among AAP-entitled candidates
+  when: __aap_entitled_allocations | length > 0
+  ansible.builtin.set_fact:
+    __selected_allocation: >-
+      {{
+        (
+          __aap_entitled_allocations
+          | selectattr('name', 'defined')
+          | selectattr('name', 'equalto', allocation_name)
+          | list
+          | first
+        )
+        | default(__aap_entitled_allocations | first, true)
+      }}
+    __reuse_existing_aap: true
+    __aap_already_attached: true
+
+- name: Fall back to allocation with matching name (may need attach)
+  when:
+    - not (__reuse_existing_aap | bool)
+  ansible.builtin.set_fact:
+    __selected_allocation: >-
       {{
         (__allocations_list.json.body | default([]))
         | selectattr('name', 'defined')
@@ -21,8 +122,10 @@
         | default({}, true)
       }}
 
-- name: Resolve Satellite version for new allocation
-  when: __existing_allocation.uuid is not defined
+- name: Create subscription allocation when none selected
+  when:
+    - not (__reuse_existing_aap | bool)
+    - __selected_allocation.uuid is not defined
   block:
     - name: List available Satellite versions
       when: allocation_version | length == 0
@@ -70,19 +173,21 @@
       register: __allocation_create
       no_log: true
 
-    - name: Set allocation UUID from create response
+    - name: Set selected allocation from create response
       ansible.builtin.set_fact:
-        __allocation_uuid: >-
-          {{
-            __allocation_create.json.body.uuid
-            | default(__allocation_create.json.uuid)
-            | default(__allocation_create.json.body.id)
-          }}
+        __selected_allocation:
+          uuid: >-
+            {{
+              __allocation_create.json.body.uuid
+              | default(__allocation_create.json.uuid)
+              | default(__allocation_create.json.body.id)
+            }}
+          name: "{{ allocation_name }}"
 
-- name: Set allocation UUID from existing allocation
-  when: __existing_allocation.uuid is defined
+- name: Set allocation UUID
   ansible.builtin.set_fact:
-    __allocation_uuid: "{{ __existing_allocation.uuid }}"
+    __allocation_uuid: "{{ __selected_allocation.uuid }}"
+    __allocation_display_name: "{{ __selected_allocation.name | default(allocation_name) }}"
 
 - name: Assert allocation UUID is set
   ansible.builtin.assert:
@@ -91,110 +196,122 @@
       - __allocation_uuid | length > 0
     fail_msg: Failed to resolve subscription allocation UUID.
 
-- name: Show allocation details
+- name: Show allocation selection
   ansible.builtin.debug:
-    msg: "Using allocation '{{ allocation_name }}' ({{ __allocation_uuid }})"
-
-- name: Get allocation details including attached entitlements
-  ansible.builtin.uri:
-    url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}?include=entitlements"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ __rhsm_access_token }}"
-    return_content: true
-  register: __allocation_details
-  no_log: true
-
-- name: List pools available for allocation
-  ansible.builtin.uri:
-    url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/pools?limit=100"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ __rhsm_access_token }}"
-    return_content: true
-  register: __allocation_pools
-  no_log: true
-
-- name: Use explicit AAP pool id when provided
-  when: aap_pool_id | length > 0
-  ansible.builtin.set_fact:
-    __aap_pool_id: "{{ aap_pool_id }}"
-
-- name: Match AAP pools by productName or name
-  when: aap_pool_id | length == 0
-  vars:
-    __pools: "{{ __allocation_pools.json.body | default([]) }}"
-  ansible.builtin.set_fact:
-    __matched_pools: >-
+    msg: >-
       {{
-        __pools
-        | selectattr('productName', 'defined')
-        | selectattr('productName', 'match', aap_pool_name_regex)
-        | list
-        + (
-          __pools
-          | selectattr('name', 'defined')
-          | selectattr('name', 'match', aap_pool_name_regex)
-          | list
+        'Reusing existing AAP-entitled allocation "' ~ __allocation_display_name
+        ~ '" (' ~ __allocation_uuid ~ '); skipping pool attach.'
+        if (__reuse_existing_aap | bool)
+        else (
+          'Using allocation "' ~ __allocation_display_name
+          ~ '" (' ~ __allocation_uuid ~ ').'
         )
       }}
 
-- name: Resolve AAP pool id from matched pools
-  when: aap_pool_id | length == 0
-  ansible.builtin.set_fact:
-    __aap_pool_id: >-
-      {{
-        (__matched_pools | first).id
-        | default((__matched_pools | first).poolId, true)
-        | default('', true)
-        if (__matched_pools | length > 0)
-        else ''
-      }}
+- name: Ensure AAP pool is attached when not already present
+  when: not (__aap_already_attached | bool)
+  block:
+    - name: Get allocation details including attached entitlements
+      ansible.builtin.uri:
+        url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}?include=entitlements"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        return_content: true
+      register: __allocation_details
+      no_log: true
 
-- name: Assert AAP pool was found
-  ansible.builtin.assert:
-    that:
-      - __aap_pool_id | length > 0
-    fail_msg: >-
-      No AAP subscription pool matched. Set aap_pool_id explicitly, or adjust
-      aap_pool_name_regex (current: {{ aap_pool_name_regex }}).
-      Available product names:
-      {{ (__allocation_pools.json.body | default([])) | map(attribute='productName') | list }}
+    - name: List pools available for allocation
+      ansible.builtin.uri:
+        url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/pools?limit=100"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        return_content: true
+      register: __allocation_pools
+      no_log: true
 
-- name: Collect attached entitlement pool ids
-  vars:
-    __ents: >-
-      {{
-        __allocation_details.json.body.entitlementsAttached.value
-        | default(__allocation_details.json.body.entitlementsAttached, true)
-        | default(__allocation_details.json.body.entitlements, true)
-        | default([], true)
-      }}
-  ansible.builtin.set_fact:
-    __attached_pool_ids: >-
-      {{
-        (__ents | map(attribute='poolId') | list)
-        + (__ents | map(attribute='pool') | list)
-        + (__ents | map(attribute='id') | list)
-      }}
+    - name: Use explicit AAP pool id when provided
+      when: aap_pool_id | length > 0
+      ansible.builtin.set_fact:
+        __aap_pool_id: "{{ aap_pool_id }}"
 
-- name: Attach AAP pool to allocation when missing
-  when: __aap_pool_id not in __attached_pool_ids
-  ansible.builtin.uri:
-    url: >-
-      {{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/entitlements?pool={{ __aap_pool_id | urlencode }}&quantity={{ aap_pool_quantity }}
-    method: POST
-    headers:
-      Authorization: "Bearer {{ __rhsm_access_token }}"
-    status_code: [200, 201]
-    return_content: true
-  register: __attach_entitlement
-  no_log: true
+    - name: Match AAP pools by productName or name
+      when: aap_pool_id | length == 0
+      vars:
+        __pools: "{{ __allocation_pools.json.body | default([]) }}"
+      ansible.builtin.set_fact:
+        __matched_pools: >-
+          {{
+            __pools
+            | selectattr('productName', 'defined')
+            | selectattr('productName', 'match', aap_pool_name_regex)
+            | list
+            + (
+              __pools
+              | selectattr('name', 'defined')
+              | selectattr('name', 'match', aap_pool_name_regex)
+              | list
+            )
+          }}
 
-- name: Note when AAP pool already attached
-  when: __aap_pool_id in __attached_pool_ids
-  ansible.builtin.debug:
-    msg: "Pool {{ __aap_pool_id }} already attached to allocation {{ __allocation_uuid }}"
+    - name: Resolve AAP pool id from matched pools
+      when: aap_pool_id | length == 0
+      ansible.builtin.set_fact:
+        __aap_pool_id: >-
+          {{
+            (__matched_pools | first).id
+            | default((__matched_pools | first).poolId, true)
+            | default('', true)
+            if (__matched_pools | length > 0)
+            else ''
+          }}
+
+    - name: Assert AAP pool was found
+      ansible.builtin.assert:
+        that:
+          - __aap_pool_id | length > 0
+        fail_msg: >-
+          No AAP subscription pool matched. Set aap_pool_id explicitly, or adjust
+          aap_pool_name_regex (current: {{ aap_pool_name_regex }}).
+          Available product names:
+          {{ (__allocation_pools.json.body | default([])) | map(attribute='productName') | list }}
+
+    - name: Collect attached entitlement pool ids
+      vars:
+        __ents: >-
+          {{
+            __allocation_details.json.body.entitlementsAttached.value
+            | default(__allocation_details.json.body.entitlementsAttached, true)
+            | default(__allocation_details.json.body.entitlements, true)
+            | default([], true)
+          }}
+      ansible.builtin.set_fact:
+        __attached_pool_ids: >-
+          {{
+            (__ents | map(attribute='poolId') | list)
+            + (__ents | map(attribute='pool') | list)
+            + (__ents | map(attribute='id') | list)
+          }}
+
+    - name: Attach AAP pool to allocation when missing
+      when: __aap_pool_id not in __attached_pool_ids
+      ansible.builtin.uri:
+        url: >-
+          {{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/entitlements?pool={{ __aap_pool_id | urlencode }}&quantity={{ aap_pool_quantity }}
+        method: POST
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        status_code: [200, 201]
+        return_content: true
+      register: __attach_entitlement
+      no_log: true
+
+    - name: Note when AAP pool already attached on selected allocation
+      when: __aap_pool_id in __attached_pool_ids
+      ansible.builtin.debug:
+        msg: "Pool {{ __aap_pool_id }} already attached to allocation {{ __allocation_uuid }}"
 
 - name: Trigger manifest export
   ansible.builtin.uri:

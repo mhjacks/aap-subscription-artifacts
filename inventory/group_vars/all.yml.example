@@ -10,6 +10,7 @@
 
 artifacts_dir: "~/Documents/aap-subscription-artifacts"
 allocation_name: aap-local
+reuse_existing_aap_allocation: true
 # aap_pool_id: ""
 aap_pool_quantity: 1
 manifest_backend: rhsm_api
