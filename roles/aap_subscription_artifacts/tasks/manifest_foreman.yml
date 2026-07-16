@@ -1,7 +1,6 @@
 ---
-# Download (and optionally create/attach) via theforeman.foreman.redhat_manifest.
-# When an offline token is available, discover an existing AAP-entitled allocation
-# first and export that UUID.
+# Download via theforeman.foreman.redhat_manifest.
+# Discovers/creates the allocation and AAP pool via RHSM so aap_pool_id is optional.
 
 - name: Assert Red Hat portal credentials for foreman backend
   ansible.builtin.assert:
@@ -14,14 +13,36 @@
       manifest_backend=foreman requires rh_username and rh_password
       (theforeman.foreman.redhat_manifest authenticates to the Customer Portal).
 
-- name: Discover existing allocations via RHSM when authenticated
+- name: Assert RHSM access token for allocation/pool discovery
+  ansible.builtin.assert:
+    that:
+      - __rhsm_access_token is defined
+      - __rhsm_access_token | length > 0
+    fail_msg: >-
+      manifest_backend=foreman needs a working RHSM offline token so it can
+      discover or create the allocation and locate the AAP pool automatically.
+
+- name: Discover existing allocations via RHSM
   ansible.builtin.include_tasks: discover_allocation.yml
-  when: __rhsm_access_token is defined
 
-- name: Download existing manifest by UUID via theforeman.foreman
-  when:
-    - __allocation_uuid is defined
-    - aap_pool_id | length == 0
+- name: Ensure an allocation UUID exists
+  ansible.builtin.include_tasks: ensure_allocation.yml
+
+- name: Show allocation selection
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        'Reusing existing AAP-entitled allocation "' ~ (__allocation_display_name | default(allocation_name))
+        ~ '" (' ~ __allocation_uuid ~ ').'
+        if (__reuse_existing_aap | default(false) | bool)
+        else (
+          'Using allocation "' ~ (__allocation_display_name | default(allocation_name))
+          ~ '" (' ~ __allocation_uuid ~ '); will attach AAP pool if needed.'
+        )
+      }}
+
+- name: Download existing AAP-entitled manifest via theforeman.foreman
+  when: __aap_already_attached | default(false) | bool
   theforeman.foreman.redhat_manifest:
     uuid: "{{ __allocation_uuid }}"
     username: "{{ rh_username }}"
@@ -31,39 +52,18 @@
     validate_certs: true
   no_log: true
 
-- name: Ensure pool on existing UUID and download via theforeman.foreman
-  when:
-    - __allocation_uuid is defined
-    - aap_pool_id | length > 0
-  theforeman.foreman.redhat_manifest:
-    uuid: "{{ __allocation_uuid }}"
-    username: "{{ rh_username }}"
-    password: "{{ rh_password }}"
-    pool_id: "{{ aap_pool_id }}"
-    quantity: "{{ aap_pool_quantity }}"
-    path: "{{ __aap_artifacts_dir }}/{{ manifest_filename }}"
-    content_access_mode: org_environment
-    validate_certs: true
-  no_log: true
-
-- name: Create or update named manifest and download via theforeman.foreman
-  when: __allocation_uuid is not defined
+- name: Resolve AAP pool and export via theforeman.foreman
+  when: not (__aap_already_attached | default(false) | bool)
   block:
-    - name: Assert AAP pool id when creating via theforeman.foreman
-      ansible.builtin.assert:
-        that:
-          - aap_pool_id | length > 0
-        fail_msg: >-
-          No existing AAP-entitled allocation was found, so
-          theforeman.foreman.redhat_manifest needs aap_pool_id to create/attach
-          allocation "{{ allocation_name }}".
+    - name: Resolve AAP pool id
+      ansible.builtin.include_tasks: resolve_aap_pool.yml
 
-    - name: Ensure named manifest has AAP pool and export zip
+    - name: Attach AAP pool and download manifest via theforeman.foreman
       theforeman.foreman.redhat_manifest:
-        name: "{{ allocation_name }}"
+        uuid: "{{ __allocation_uuid }}"
         username: "{{ rh_username }}"
         password: "{{ rh_password }}"
-        pool_id: "{{ aap_pool_id }}"
+        pool_id: "{{ __aap_pool_id }}"
         quantity: "{{ aap_pool_quantity }}"
         path: "{{ __aap_artifacts_dir }}/{{ manifest_filename }}"
         content_access_mode: org_environment
@@ -75,8 +75,4 @@
     msg: >-
       Wrote manifest via theforeman.foreman.redhat_manifest to
       {{ __aap_artifacts_dir }}/{{ manifest_filename }}
-      {{
-        '(uuid ' ~ __allocation_uuid ~ ')'
-        if (__allocation_uuid is defined)
-        else '(name ' ~ allocation_name ~ ')'
-      }}.
+      (uuid {{ __allocation_uuid }}).

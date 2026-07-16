@@ -1,0 +1,71 @@
+---
+# Ensure __allocation_uuid is set, creating a new allocation via RHSM when needed.
+# Requires __rhsm_access_token.
+
+- name: Create subscription allocation when none selected
+  when: __allocation_uuid is not defined
+  block:
+    - name: List available Satellite versions
+      when: allocation_version | length == 0
+      ansible.builtin.uri:
+        url: "{{ rhsm_api_base }}/allocations/versions"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        return_content: true
+      register: __allocation_versions
+      no_log: true
+
+    - name: Pick latest Satellite version when unset
+      when: allocation_version | length == 0
+      vars:
+        __version_body: "{{ __allocation_versions.json.body | default([]) }}"
+      ansible.builtin.set_fact:
+        __allocation_version: >-
+          {{
+            (
+              __version_body
+              | map(attribute='value')
+              | list
+              if (__version_body | length > 0 and __version_body[0] is mapping)
+              else (__version_body | list)
+            )
+            | sort
+            | last
+            | default('sat-6.16', true)
+          }}
+
+    - name: Use configured allocation version
+      when: allocation_version | length > 0
+      ansible.builtin.set_fact:
+        __allocation_version: "{{ allocation_version }}"
+
+    - name: Create subscription allocation
+      ansible.builtin.uri:
+        url: "{{ rhsm_api_base }}/allocations?Name={{ allocation_name | urlencode }}&version={{ __allocation_version | urlencode }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        status_code: [200, 201]
+        return_content: true
+      register: __allocation_create
+      no_log: true
+
+    - name: Set allocation UUID from create response
+      ansible.builtin.set_fact:
+        __allocation_uuid: >-
+          {{
+            __allocation_create.json.body.uuid
+            | default(__allocation_create.json.uuid)
+            | default(__allocation_create.json.body.id)
+          }}
+        __allocation_display_name: "{{ allocation_name }}"
+        __reuse_existing_aap: false
+        __aap_already_attached: false
+
+- name: Assert allocation UUID is set
+  ansible.builtin.assert:
+    that:
+      - __allocation_uuid is defined
+      - __allocation_uuid | length > 0
+    fail_msg: Failed to resolve subscription allocation UUID.

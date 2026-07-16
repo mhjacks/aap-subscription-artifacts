@@ -76,7 +76,7 @@ ansible-playbook playbooks/fetch_artifacts.yml \
   -e @creds.yml
 ```
 
-With an offline token present, the role still discovers an existing AAP-entitled allocation over the RHSM API, then downloads it with `theforeman.foreman.redhat_manifest` (uuid + portal credentials). If none exists, pass `aap_pool_id` so the module can create/attach `allocation_name` and export the zip.
+With an offline token present, the role discovers or creates the allocation over the RHSM API, locates an AAP pool by name match (`aap_pool_name_regex`), then downloads with `theforeman.foreman.redhat_manifest`. You do not need to look up `aap_pool_id` in the UI unless auto-discovery fails.
 
 ### One-shot (generate + fetch)
 
@@ -103,7 +103,7 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 | `allocation_uuid` | unset | Explicit allocation UUID to export |
 | `allocation_version` | latest from API | Satellite version for new allocations (RHSM API backend) |
 | `reuse_existing_aap_allocation` | `true` | Reuse any existing allocation that already has AAP attached |
-| `aap_pool_id` | unset | Explicit pool id (required for foreman create path) |
+| `aap_pool_id` | unset | Explicit pool id (optional; auto-discovered from allocation pools) |
 | `aap_pool_name_regex` | `(?i)ansible.?automation.?platform` | Pool product name match |
 | `aap_pool_quantity` | `1` | Quantity to attach |
 | `manifest_backend` | `rhsm_api` | `rhsm_api` or `foreman` (`satellite_module` alias) |
