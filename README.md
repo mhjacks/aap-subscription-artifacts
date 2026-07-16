@@ -70,6 +70,16 @@ Fetch will:
 
 By default the role reuses `allocation_name` when it exists, otherwise **creates** it (`create_allocation_if_missing: true`), enables SCA, and exports the manifest.
 
+Creating a new allocation via `POST /allocations` on the RHSM management API often returns **HTTP 403**. Creation therefore prefers the Customer Portal path (`theforeman.foreman.redhat_manifest` with `content_access_mode: org_environment`), which needs `rh_username` / `rh_password` (same credentials as the web UI):
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+ansible-playbook playbooks/fetch_artifacts.yml \
+  -e allocation_name=aap-local \
+  -e rh_username=YOUR_RH_USER \
+  -e rh_password=YOUR_RH_PASSWORD
+```
+
 ### Create an SCA allocation (console-compatible)
 
 Same flow as the Hybrid Cloud Console (no pool picking):
@@ -79,8 +89,11 @@ Same flow as the Hybrid Cloud Console (no pool picking):
 3. `GET /allocations/{uuid}/export`
 
 ```bash
+ansible-galaxy collection install -r requirements.yml
 ansible-playbook playbooks/fetch_artifacts.yml \
-  -e allocation_name=aap-local
+  -e allocation_name=aap-local \
+  -e rh_username=YOUR_RH_USER \
+  -e rh_password=YOUR_RH_PASSWORD
 ```
 
 ### Download via `theforeman.foreman`
@@ -115,7 +128,7 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `rh_offline_token` | (file) | Offline token; falls back to `rh-offline-token` file |
-| `rh_username` / `rh_password` | unset | Password-grant generate; **required** for `manifest_backend=foreman` |
+| `rh_username` / `rh_password` | unset | Needed to **create** allocations (portal) and for `manifest_backend=foreman` |
 | `artifacts_dir` | `~/Documents/aap-subscription-artifacts` | Output directory |
 | `allocation_name` | `aap-local` | Preferred allocation name |
 | `allocation_uuid` | unset | Explicit allocation UUID to export |

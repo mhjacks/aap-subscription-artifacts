@@ -1,67 +1,131 @@
 ---
-# Ensure __allocation_uuid is set. Creates only when create_allocation_if_missing.
-# Requires __rhsm_access_token.
+# Ensure __allocation_uuid is set. Creates when create_allocation_if_missing.
+# Create prefers the Customer Portal API (theforeman.foreman.redhat_manifest)
+# because POST /allocations on the RHSM management API often returns 403.
+# Requires __rhsm_access_token for SCA enable and for RHSM-API create fallback.
 
 - name: Create subscription allocation when missing and allowed
   when:
     - __allocation_uuid is not defined
     - create_allocation_if_missing | bool
   block:
-    - name: List available Satellite versions
-      when: allocation_version | length == 0
-      ansible.builtin.uri:
-        url: "{{ rhsm_api_base }}/allocations/versions"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ __rhsm_access_token }}"
-        return_content: true
-      register: __allocation_versions
-      no_log: true
+    - name: Create SCA allocation via Customer Portal (theforeman.foreman)
+      when:
+        - rh_username is defined
+        - rh_username | length > 0
+        - rh_password is defined
+        - rh_password | length > 0
+      block:
+        - name: Ensure Red Hat Entitlement Platform CA when validating portal TLS
+          ansible.builtin.include_tasks: ensure_rhsm_ca.yml
+          when: foreman_validate_certs | bool
 
-    - name: Pick latest Satellite version when unset
-      when: allocation_version | length == 0
-      vars:
-        __version_body: "{{ __allocation_versions.json.body | default([]) }}"
-      ansible.builtin.set_fact:
-        __allocation_version: >-
-          {{
-            (
-              __version_body
-              | map(attribute='value')
-              | list
-              if (__version_body | length > 0 and __version_body[0] is mapping)
-              else (__version_body | list)
-            )
-            | sort
-            | last
-            | default('sat-6.16', true)
-          }}
+        - name: Create named SCA allocation on the Customer Portal
+          theforeman.foreman.redhat_manifest:
+            name: "{{ allocation_name }}"
+            username: "{{ rh_username }}"
+            password: "{{ rh_password }}"
+            content_access_mode: org_environment
+            validate_certs: "{{ foreman_validate_certs }}"
+          register: __portal_allocation_create
+          no_log: true
 
-    - name: Use configured allocation version
-      when: allocation_version | length > 0
-      ansible.builtin.set_fact:
-        __allocation_version: "{{ allocation_version }}"
+        - name: Set allocation UUID from portal create
+          ansible.builtin.set_fact:
+            __allocation_uuid: "{{ __portal_allocation_create.uuid }}"
+            __allocation_display_name: "{{ allocation_name }}"
 
-    - name: Create subscription allocation
-      ansible.builtin.uri:
-        url: "{{ rhsm_api_base }}/allocations?Name={{ allocation_name | urlencode }}&version={{ __allocation_version | urlencode }}"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ __rhsm_access_token }}"
-        status_code: [200, 201]
-        return_content: true
-      register: __allocation_create
-      no_log: true
+        - name: Assert portal create returned a UUID
+          ansible.builtin.assert:
+            that:
+              - __allocation_uuid is defined
+              - __allocation_uuid | length > 0
+            fail_msg: >-
+              theforeman.foreman.redhat_manifest created allocation
+              "{{ allocation_name }}" but did not return a uuid.
 
-    - name: Set allocation UUID from create response
-      ansible.builtin.set_fact:
-        __allocation_uuid: >-
-          {{
-            __allocation_create.json.body.uuid
-            | default(__allocation_create.json.uuid)
-            | default(__allocation_create.json.body.id)
-          }}
-        __allocation_display_name: "{{ allocation_name }}"
+    - name: Create allocation via RHSM management API when portal credentials are absent
+      when: __allocation_uuid is not defined
+      block:
+        - name: List available Satellite versions
+          when: allocation_version | length == 0
+          ansible.builtin.uri:
+            url: "{{ rhsm_api_base }}/allocations/versions"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ __rhsm_access_token }}"
+            return_content: true
+          register: __allocation_versions
+          no_log: true
+
+        - name: Pick latest Satellite version when unset
+          when: allocation_version | length == 0
+          vars:
+            __version_body: "{{ __allocation_versions.json.body | default([]) }}"
+          ansible.builtin.set_fact:
+            __allocation_version: >-
+              {{
+                (
+                  __version_body
+                  | map(attribute='value')
+                  | list
+                  if (__version_body | length > 0 and __version_body[0] is mapping)
+                  else (__version_body | list)
+                )
+                | sort
+                | last
+                | default('sat-6.16', true)
+              }}
+
+        - name: Use configured allocation version
+          when: allocation_version | length > 0
+          ansible.builtin.set_fact:
+            __allocation_version: "{{ allocation_version }}"
+
+        - name: Create subscription allocation via RHSM API
+          ansible.builtin.uri:
+            url: "{{ rhsm_api_base }}/allocations?Name={{ allocation_name | urlencode }}&version={{ __allocation_version | urlencode }}"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ __rhsm_access_token }}"
+            status_code: [200, 201, 403, 400]
+            return_content: true
+          register: __allocation_create
+          no_log: true
+          failed_when: false
+
+        - name: Fail helpfully when RHSM API create is forbidden
+          when: (__allocation_create.status | default(0)) == 403
+          ansible.builtin.fail:
+            msg: >-
+              RHSM management API refused to create allocation "{{ allocation_name }}"
+              (HTTP 403). Creating allocations usually requires Customer Portal
+              username/password via theforeman.foreman (same path as the web UI).
+              Re-run with -e rh_username=... -e rh_password=... after
+              ansible-galaxy collection install -r requirements.yml,
+              or create "{{ allocation_name }}" in the Hybrid Cloud Console and
+              re-run so it can be discovered and exported.
+              Existing allocations: {{ __allocation_choices | default([]) }}
+
+        - name: Fail when RHSM API create did not succeed
+          when: (__allocation_create.status | default(0)) not in [200, 201]
+          ansible.builtin.fail:
+            msg: >-
+              RHSM API create for "{{ allocation_name }}" failed with HTTP
+              {{ __allocation_create.status | default('unknown') }}.
+              Provide rh_username/rh_password to create via the Customer Portal,
+              or pick an existing allocation_name/allocation_uuid.
+              Existing: {{ __allocation_choices | default([]) }}
+
+        - name: Set allocation UUID from RHSM create response
+          ansible.builtin.set_fact:
+            __allocation_uuid: >-
+              {{
+                __allocation_create.json.body.uuid
+                | default(__allocation_create.json.uuid)
+                | default(__allocation_create.json.body.id)
+              }}
+            __allocation_display_name: "{{ allocation_name }}"
 
 - name: Enable Simple Content Access on the allocation
   when:
@@ -77,17 +141,25 @@
     body:
       simpleContentAccess: enabled
     status_code: [200, 204]
+    failed_when: false
   register: __sca_enable
   no_log: true
 
-- name: Note Simple Content Access enabled
+- name: Note Simple Content Access enable result
   when:
     - enable_simple_content_access | bool
     - __allocation_uuid is defined
   ansible.builtin.debug:
     msg: >-
-      Ensured simpleContentAccess=enabled on allocation {{ __allocation_uuid }}
-      (SCA: export without attaching pools, same as the Hybrid Cloud Console flow).
+      {{
+        'Ensured simpleContentAccess=enabled on allocation ' ~ __allocation_uuid
+        if (__sca_enable.status | default(0)) in [200, 204]
+        else (
+          'Could not PUT simpleContentAccess on ' ~ __allocation_uuid
+          ~ ' (HTTP ' ~ (__sca_enable.status | default('n/a'))
+          ~ '); continuing — portal create may already be SCA.'
+        )
+      }}
 
 - name: Assert allocation UUID is set
   ansible.builtin.assert:
@@ -97,5 +169,6 @@
     fail_msg: >-
       No subscription allocation selected for download.
       Set allocation_name or allocation_uuid to an existing allocation, or set
-      create_allocation_if_missing=true to create "{{ allocation_name }}".
+      create_allocation_if_missing=true with rh_username/rh_password to create
+      "{{ allocation_name }}" via the Customer Portal.
       Available allocations: {{ __allocation_choices | default([]) }}

@@ -1,5 +1,6 @@
 ---
-# Required when manifest_backend=foreman (or satellite_module alias)
+# Always needed when creating an SCA allocation (portal path) or using
+# manifest_backend=foreman. Safe to install even for rhsm_api-only download.
 collections:
   - name: theforeman.foreman
     version: ">=3.8.0"
