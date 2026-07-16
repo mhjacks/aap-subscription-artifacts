@@ -1,0 +1,39 @@
+---
+- name: Refresh SSO access token for RHSM API
+  ansible.builtin.uri:
+    url: "{{ sso_token_url }}"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: refresh_token
+      client_id: rhsm-api
+      refresh_token: "{{ __rh_offline_token }}"
+  register: __sso_rhsm
+  no_log: true
+
+- name: Set RHSM bearer token
+  ansible.builtin.set_fact:
+    __rhsm_access_token: "{{ __sso_rhsm.json.access_token }}"
+  no_log: true
+
+- name: Refresh SSO access token for Automation Hub (cloud-services)
+  ansible.builtin.uri:
+    url: "{{ sso_token_url }}"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: refresh_token
+      client_id: cloud-services
+      refresh_token: "{{ __rh_offline_token }}"
+    status_code: [200, 400, 401]
+  register: __sso_hub
+  no_log: true
+  failed_when: false
+
+- name: Warn if Hub client refresh failed
+  when: __sso_hub.status | default(0) != 200
+  ansible.builtin.debug:
+    msg: >-
+      cloud-services refresh failed (status {{ __sso_hub.status | default('n/a') }}).
+      RHSM auth succeeded; Hub token file will still be written from the offline token.
+      Prefer a token from {{ hub_token_url }} for ansible-galaxy / Hub sync.

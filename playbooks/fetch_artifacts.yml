@@ -1,0 +1,9 @@
+---
+- name: Fetch AAP subscription manifest and Automation Hub token
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: aap_subscription_artifacts
+      vars:
+        aap_artifacts_action: fetch

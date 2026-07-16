@@ -1,0 +1,57 @@
+---
+- name: Normalize artifacts directory path
+  ansible.builtin.set_fact:
+    __aap_artifacts_dir: "{{ artifacts_dir | expanduser }}"
+
+- name: Ensure artifacts directory exists
+  ansible.builtin.file:
+    path: "{{ __aap_artifacts_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Generate offline token
+  ansible.builtin.include_tasks: generate_offline_token.yml
+  when: aap_artifacts_action in ["generate", "all"]
+
+- name: Resolve offline token for fetch
+  when: aap_artifacts_action in ["fetch", "all"]
+  block:
+    - name: Load offline token from variable or file
+      ansible.builtin.set_fact:
+        __rh_offline_token: >-
+          {{
+            rh_offline_token
+            if (rh_offline_token is defined and rh_offline_token | length > 0)
+            else (lookup('file', __aap_artifacts_dir ~ '/' ~ offline_token_filename, errors='ignore') | default('', true) | trim)
+          }}
+      no_log: true
+
+    - name: Assert offline token is available
+      ansible.builtin.assert:
+        that:
+          - __rh_offline_token | length > 0
+        fail_msg: >-
+          No offline token found. Set rh_offline_token, place a token at
+          {{ __aap_artifacts_dir }}/{{ offline_token_filename }}, or run
+          playbooks/generate_offline_token.yml first.
+
+    - name: Authenticate to Red Hat SSO
+      ansible.builtin.include_tasks: auth.yml
+
+    - name: Obtain subscription manifest via RHSM API
+      ansible.builtin.include_tasks: manifest.yml
+      when: manifest_backend != 'satellite_module'
+
+    - name: Obtain subscription manifest via redhat.satellite
+      ansible.builtin.include_tasks: manifest_satellite.yml
+      when: manifest_backend == 'satellite_module'
+
+    - name: Write Automation Hub token file
+      ansible.builtin.include_tasks: hub_token.yml
+
+    - name: Summarize artifact paths
+      ansible.builtin.debug:
+        msg:
+          - "Manifest: {{ __aap_artifacts_dir }}/{{ manifest_filename }}"
+          - "Hub token: {{ __aap_artifacts_dir }}/{{ hub_token_filename }}"
+          - "Offline token: {{ __aap_artifacts_dir }}/{{ offline_token_filename }}"

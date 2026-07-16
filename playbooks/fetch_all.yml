@@ -1,0 +1,9 @@
+---
+- name: Generate offline token then fetch AAP subscription artifacts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: aap_subscription_artifacts
+      vars:
+        aap_artifacts_action: all

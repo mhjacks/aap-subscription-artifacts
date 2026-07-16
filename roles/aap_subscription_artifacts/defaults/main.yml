@@ -1,0 +1,36 @@
+---
+# Optional when {{ artifacts_dir }}/{{ offline_token_filename }} already exists
+# rh_offline_token: ""
+
+# Optional: password-grant generate attempt and/or satellite_module backend
+# rh_username: ""
+# rh_password: ""
+
+# generate | fetch | all
+aap_artifacts_action: fetch
+
+# rhsm_api (default) | satellite_module
+manifest_backend: rhsm_api
+
+artifacts_dir: "~/Documents/aap-subscription-artifacts"
+offline_token_filename: rh-offline-token
+manifest_filename: aap-manifest.zip
+hub_token_filename: automation-hub-token
+
+open_token_urls: true
+hub_token_url: https://console.redhat.com/ansible/automation-hub/token
+rhsm_token_url: https://access.redhat.com/management/api
+
+sso_token_url: https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token
+rhsm_api_base: https://api.access.redhat.com/management/v1
+
+# Allocation / pool
+allocation_name: aap-local
+# Empty = pick latest version from /allocations/versions
+allocation_version: ""
+aap_pool_id: ""
+aap_pool_name_regex: "(?i)ansible.?automation.?platform"
+aap_pool_quantity: 1
+
+export_retries: 30
+export_delay: 10

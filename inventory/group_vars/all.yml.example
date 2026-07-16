@@ -1,0 +1,15 @@
+---
+# Example non-secret defaults. Copy to a gitignored creds.yml for secrets:
+#   cp inventory/group_vars/all.yml.example creds.yml
+#   # edit creds.yml, then:
+#   ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
+
+# rh_offline_token: "paste-offline-token-here"
+# rh_username: "your-redhat-login"
+# rh_password: "your-redhat-password"
+
+artifacts_dir: "~/Documents/aap-subscription-artifacts"
+allocation_name: aap-local
+# aap_pool_id: ""
+aap_pool_quantity: 1
+manifest_backend: rhsm_api

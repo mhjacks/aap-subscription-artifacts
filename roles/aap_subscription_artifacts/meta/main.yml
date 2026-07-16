@@ -1,0 +1,27 @@
+---
+galaxy_info:
+  role_name: aap_subscription_artifacts
+  author: mhjacks
+  description: >
+    Generate a Red Hat offline token, create/attach an AAP subscription
+    allocation, export a Satellite-style manifest zip, and store an
+    Automation Hub offline token locally.
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Fedora
+      versions:
+        - all
+    - name: EL
+      versions:
+        - "8"
+        - "9"
+        - "10"
+  galaxy_tags:
+    - aap
+    - ansible
+    - redhat
+    - subscription
+    - hub
+
+dependencies: []

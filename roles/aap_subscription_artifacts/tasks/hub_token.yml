@@ -1,0 +1,15 @@
+---
+- name: Persist offline token file when missing
+  ansible.builtin.copy:
+    content: "{{ __rh_offline_token }}\n"
+    dest: "{{ __aap_artifacts_dir }}/{{ offline_token_filename }}"
+    mode: "0600"
+    force: false
+  no_log: true
+
+- name: Write Automation Hub offline token
+  ansible.builtin.copy:
+    content: "{{ __rh_offline_token }}\n"
+    dest: "{{ __aap_artifacts_dir }}/{{ hub_token_filename }}"
+    mode: "0600"
+  no_log: true

@@ -1,0 +1,27 @@
+# Credentials and secrets
+creds.yml
+**/creds.yml
+*vault*
+*.vault
+.vault_pass
+.vault_password
+
+# Downloaded / generated artifacts (also under Documents by default)
+artifacts/
+**/aap-manifest.zip
+**/rh-offline-token
+**/automation-hub-token
+*.zip
+
+# Ansible
+*.retry
+.ansible/
+collections/
+.galaxy_install_info
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store

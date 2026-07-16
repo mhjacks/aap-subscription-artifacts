@@ -1,0 +1,164 @@
+---
+- name: Attempt password-grant offline token (best effort)
+  when:
+    - rh_username is defined
+    - rh_username | length > 0
+    - rh_password is defined
+    - rh_password | length > 0
+  block:
+    - name: Try password grant with cloud-services client
+      ansible.builtin.uri:
+        url: "{{ sso_token_url }}"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: password
+          client_id: cloud-services
+          username: "{{ rh_username }}"
+          password: "{{ rh_password }}"
+          scope: openid offline_access
+        status_code: [200, 400, 401]
+      register: __pw_grant_cloud
+      no_log: true
+      failed_when: false
+
+    - name: Try password grant with rhsm-api client
+      when: >-
+        __pw_grant_cloud.status != 200
+        or (__pw_grant_cloud.json.refresh_token | default('') | length) == 0
+      ansible.builtin.uri:
+        url: "{{ sso_token_url }}"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: password
+          client_id: rhsm-api
+          username: "{{ rh_username }}"
+          password: "{{ rh_password }}"
+          scope: openid offline_access
+        status_code: [200, 400, 401]
+      register: __pw_grant_rhsm
+      no_log: true
+      failed_when: false
+
+    - name: Set token from successful password grant
+      when: >-
+        (__pw_grant_cloud.status | default(0) == 200
+         and (__pw_grant_cloud.json.refresh_token | default('') | length) > 0)
+        or
+        (__pw_grant_rhsm is defined
+         and __pw_grant_rhsm.status | default(0) == 200
+         and (__pw_grant_rhsm.json.refresh_token | default('') | length) > 0)
+      ansible.builtin.set_fact:
+        __generated_offline_token: >-
+          {{
+            __pw_grant_cloud.json.refresh_token
+            if (__pw_grant_cloud.status | default(0) == 200
+                and (__pw_grant_cloud.json.refresh_token | default('') | length) > 0)
+            else __pw_grant_rhsm.json.refresh_token
+          }}
+      no_log: true
+
+    - name: Note password grant unavailable
+      when: __generated_offline_token is not defined
+      ansible.builtin.debug:
+        msg: >-
+          Password grant did not return an offline token (often disabled on
+          Red Hat SSO). Falling back to interactive console capture.
+
+- name: Interactive offline token capture
+  when: __generated_offline_token is not defined
+  block:
+    - name: Show Red Hat token URLs
+      ansible.builtin.debug:
+        msg:
+          - "Open one of these pages, generate/load a token, and copy it:"
+          - "  Automation Hub: {{ hub_token_url }}"
+          - "  RHSM API Tokens: {{ rhsm_token_url }}"
+
+    - name: Open token URLs in a browser when possible
+      when: open_token_urls | bool
+      ansible.builtin.command:
+        cmd: "xdg-open {{ item }}"
+      loop:
+        - "{{ hub_token_url }}"
+        - "{{ rhsm_token_url }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Prompt for offline token paste
+      ansible.builtin.pause:
+        prompt: |
+          Paste your Red Hat offline token, then press Return.
+          (Input is not hidden by Ansible pause; prefer a private terminal.)
+      register: __token_pause
+      no_log: true
+
+    - name: Set token from interactive paste
+      ansible.builtin.set_fact:
+        __generated_offline_token: "{{ __token_pause.user_input | trim }}"
+      no_log: true
+
+- name: Assert a token was obtained
+  ansible.builtin.assert:
+    that:
+      - __generated_offline_token is defined
+      - __generated_offline_token | length > 0
+    fail_msg: No offline token was generated or provided.
+
+- name: Validate offline token with cloud-services refresh
+  ansible.builtin.uri:
+    url: "{{ sso_token_url }}"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: refresh_token
+      client_id: cloud-services
+      refresh_token: "{{ __generated_offline_token }}"
+    status_code: [200, 400, 401]
+  register: __validate_cloud
+  no_log: true
+  failed_when: false
+
+- name: Validate offline token with rhsm-api refresh
+  ansible.builtin.uri:
+    url: "{{ sso_token_url }}"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: refresh_token
+      client_id: rhsm-api
+      refresh_token: "{{ __generated_offline_token }}"
+    status_code: [200, 400, 401]
+  register: __validate_rhsm
+  no_log: true
+  failed_when: false
+
+- name: Assert at least one SSO client accepts the token
+  ansible.builtin.assert:
+    that:
+      - (__validate_cloud.status | default(0) == 200)
+        or (__validate_rhsm.status | default(0) == 200)
+    fail_msg: >-
+      Offline token failed validation against both cloud-services and rhsm-api.
+      Generate a fresh token at {{ hub_token_url }} or {{ rhsm_token_url }}.
+
+- name: Write offline token file
+  ansible.builtin.copy:
+    content: "{{ __generated_offline_token }}\n"
+    dest: "{{ __aap_artifacts_dir }}/{{ offline_token_filename }}"
+    mode: "0600"
+  no_log: true
+
+- name: Write Automation Hub token file from offline token
+  ansible.builtin.copy:
+    content: "{{ __generated_offline_token }}\n"
+    dest: "{{ __aap_artifacts_dir }}/{{ hub_token_filename }}"
+    mode: "0600"
+  no_log: true
+
+- name: Report generated token path
+  ansible.builtin.debug:
+    msg:
+      - "Wrote offline token to {{ __aap_artifacts_dir }}/{{ offline_token_filename }}"
+      - "Wrote Hub token to {{ __aap_artifacts_dir }}/{{ hub_token_filename }}"
