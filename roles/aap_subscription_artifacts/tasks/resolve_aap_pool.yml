@@ -1,7 +1,5 @@
 ---
 # Resolve __aap_pool_id for adding an AAP subscription onto an SCA allocation.
-# SCA still requires subscriptions on the *allocation* (manifest); it only
-# removes attaching subscriptions to *hosts*.
 
 - name: Use explicit AAP pool id when provided
   when: aap_pool_id | length > 0
@@ -13,7 +11,7 @@
   block:
     - name: List pools available for allocation
       ansible.builtin.uri:
-        url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/pools?limit=100"
+        url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/pools?limit=1000&future=true"
         method: GET
         headers:
           Authorization: "Bearer {{ __rhsm_access_token }}"
@@ -21,10 +19,12 @@
       register: __allocation_pools
       no_log: true
 
-    - name: Match AAP pools by productName or name
+    - name: Build pool inventory for matching
       vars:
         __pools: "{{ __allocation_pools.json.body | default([]) }}"
       ansible.builtin.set_fact:
+        __pool_product_names: "{{ __pools | map(attribute='productName') | list }}"
+        __pool_names: "{{ __pools | map(attribute='name') | select('defined') | list }}"
         __matched_pools: >-
           {{
             __pools
@@ -35,6 +35,12 @@
               __pools
               | selectattr('name', 'defined')
               | selectattr('name', 'match', aap_pool_name_regex)
+              | list
+            )
+            + (
+              __pools
+              | selectattr('productName', 'defined')
+              | selectattr('productName', 'search', 'Ansible')
               | list
             )
           }}
@@ -62,9 +68,6 @@
       - __aap_pool_id | length > 0
     fail_msg: >-
       No AAP subscription pool matched on allocation {{ __allocation_uuid }}.
-      An SCA allocation still needs the AAP subscription added to the allocation
-      before export (hosts do not need attach; the manifest does).
-      Set aap_pool_id or adjust aap_pool_name_regex ({{ aap_pool_name_regex }}).
-      Available product names:
-      {{ (__allocation_pools.json.body | default([])) | map(attribute='productName') | list
-         if (__allocation_pools is defined) else [] }}
+      Set aap_pool_id explicitly. Regex={{ aap_pool_name_regex }}.
+      productNames={{ __pool_product_names | default([]) }}.
+      names={{ __pool_names | default([]) }}.
