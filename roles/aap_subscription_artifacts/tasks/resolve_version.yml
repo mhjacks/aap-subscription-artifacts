@@ -1,0 +1,41 @@
+---
+# Resolve __allocation_version (e.g. sat-6.19).
+# RHSM /allocations/versions returns newest first.
+
+- name: Use configured allocation_version when set
+  when: allocation_version | length > 0
+  ansible.builtin.set_fact:
+    __allocation_version: "{{ allocation_version }}"
+
+- name: List available Satellite versions from RHSM API
+  when: allocation_version | length == 0
+  ansible.builtin.uri:
+    url: "{{ rhsm_api_base }}/allocations/versions"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ __rhsm_access_token }}"
+    return_content: true
+  register: __allocation_versions
+  no_log: true
+
+- name: Pick newest Satellite version from RHSM list
+  when: allocation_version | length == 0
+  vars:
+    __version_body: "{{ __allocation_versions.json.body | default([]) }}"
+  ansible.builtin.set_fact:
+    __allocation_version: >-
+      {{
+        (
+          __version_body
+          | map(attribute='value')
+          | list
+          if (__version_body | length > 0 and __version_body[0] is mapping)
+          else (__version_body | list)
+        )
+        | first
+        | default('sat-6.19', true)
+      }}
+
+- name: Show resolved Satellite version
+  ansible.builtin.debug:
+    msg: "Using Satellite allocation version {{ __allocation_version }}"

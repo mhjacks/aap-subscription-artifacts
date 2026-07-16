@@ -2,7 +2,7 @@
 # Optional when {{ artifacts_dir }}/{{ offline_token_filename }} already exists
 # rh_offline_token: ""
 
-# Optional: password-grant generate; required to create allocations via portal
+# Optional: password-grant generate; required to create/attach via portal
 # rh_username: ""
 # rh_password: ""
 
@@ -10,7 +10,6 @@
 aap_artifacts_action: fetch
 
 # rhsm_api (default) | foreman (theforeman.foreman.redhat_manifest)
-# satellite_module is accepted as an alias for foreman
 manifest_backend: rhsm_api
 
 artifacts_dir: "~/Documents/aap-subscription-artifacts"
@@ -24,17 +23,31 @@ rhsm_token_url: https://access.redhat.com/management/api
 
 sso_token_url: https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token
 rhsm_api_base: https://api.access.redhat.com/management/v1
+portal_api_base: https://subscription.rhsm.redhat.com
 
-# SCA allocation only — no pool listing or attach
-allocation_name: aap-local
+# Target allocation name (created when missing)
+allocation_name: new-aap-allocation
 allocation_uuid: ""
 allocation_version: ""
 reuse_existing_allocation: true
+# Only used when named alloc is missing and create_allocation_if_missing=false
+prefer_aap_entitled_allocation: false
 create_allocation_if_missing: true
+replace_empty_named_allocation: false
+replace_empty_max_version: "6.9"
 enable_simple_content_access: true
+
+# Attach one SKU when the selected allocation does not already have it
+attach_subscriptions: true
+force_attach_subscriptions: false
+# Default AAP SKU to attach (pool productId / entitlement sku)
+aap_sku: MCT4701
+pool_ids: []
+pool_quantity: 1
+# Used only to label "AAP-entitled" allocations in discovery when sku is absent
+pool_product_regex: "(?i)(ansible.?automation|red.?hat.?ansible)"
 
 export_retries: 30
 export_delay: 10
 
-# Portal TLS for theforeman.foreman.redhat_manifest (false = no redhat-uep.pem)
 foreman_validate_certs: false

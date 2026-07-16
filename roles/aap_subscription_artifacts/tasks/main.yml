@@ -52,6 +52,7 @@
     - name: Summarize artifact paths
       ansible.builtin.debug:
         msg:
+          - "Allocation: {{ __allocation_display_name | default(allocation_name) }} ({{ __allocation_uuid | default('unknown') }})"
           - "Manifest: {{ __aap_artifacts_dir }}/{{ manifest_filename }}"
           - "Hub token: {{ __aap_artifacts_dir }}/{{ hub_token_filename }}"
           - "Offline token: {{ __aap_artifacts_dir }}/{{ offline_token_filename }}"

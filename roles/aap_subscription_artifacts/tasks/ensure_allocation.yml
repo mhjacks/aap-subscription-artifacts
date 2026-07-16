@@ -1,34 +1,110 @@
 ---
 # Ensure __allocation_uuid is set. Creates when create_allocation_if_missing.
-# Create prefers the Customer Portal API (theforeman.foreman.redhat_manifest)
-# because POST /allocations on the RHSM management API often returns 403.
+# Create uses the Customer Portal consumers API with a modern Satellite
+# version — theforeman.foreman.redhat_manifest hardcodes sat-6.3.
+# Empty/outdated named allocations can be replaced when portal creds exist.
+
+- name: Resolve Satellite version for create/replace
+  when: >
+    (
+      ((__allocation_uuid is not defined) or (__allocation_uuid | length == 0))
+      and (create_allocation_if_missing | bool)
+    )
+    or (
+      (__allocation_uuid is defined)
+      and (__allocation_uuid | length > 0)
+      and (replace_empty_named_allocation | bool)
+      and (__selected_allocation.entitlementsAttachedQuantity | default(0) | int) == 0
+      and (__aap_entitled_allocations | default([]) | length) == 0
+      and ((__selected_allocation.version | default('99') | string) is version(replace_empty_max_version, '<='))
+    )
+  ansible.builtin.include_tasks: resolve_version.yml
+
+- name: Replace empty named allocation so it can be recreated modern
+  when:
+    - replace_empty_named_allocation | bool
+    - __allocation_uuid is defined
+    - __allocation_uuid | length > 0
+    - (__selected_allocation.name | default('')) == allocation_name
+    - (__selected_allocation.entitlementsAttachedQuantity | default(0) | int) == 0
+    - (__aap_entitled_allocations | default([]) | length) == 0
+    - >
+      (__selected_allocation.version | default('99') | string) is version(replace_empty_max_version, '<=')
+  block:
+    - name: Remember version of empty allocation before delete
+      ansible.builtin.set_fact:
+        __replaced_allocation_version: "{{ __selected_allocation.version | default('unknown') }}"
+
+    - name: Delete empty allocation via RHSM API
+      ansible.builtin.uri:
+        url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}?force=true"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        status_code: [200, 204, 404]
+      register: __allocation_delete
+      failed_when: false
+      no_log: true
+
+    - name: Clear allocation UUID after delete
+      when: (__allocation_delete.status | default(0)) in [200, 204, 404]
+      ansible.builtin.set_fact:
+        __allocation_uuid: ""
+        __selected_allocation: {}
+
+    - name: Note allocation replace
+      ansible.builtin.debug:
+        msg: >-
+          Removed empty allocation "{{ allocation_name }}"
+          (was Satellite {{ __replaced_allocation_version }}, 0 entitlements)
+          so it can be recreated at {{ __allocation_version | default('latest') }}.
 
 - name: Create subscription allocation when missing and allowed
   when:
-    - __allocation_uuid is not defined
+    - (__allocation_uuid is not defined) or (__allocation_uuid | length == 0)
     - create_allocation_if_missing | bool
   block:
-    - name: Create SCA allocation via Customer Portal (theforeman.foreman)
+    - name: Create SCA allocation via Customer Portal API
       when:
         - rh_username is defined
         - rh_username | length > 0
         - rh_password is defined
         - rh_password | length > 0
       block:
+        - name: Ensure Satellite version is resolved
+          when: __allocation_version is not defined
+          ansible.builtin.include_tasks: resolve_version.yml
+
         - name: Create named SCA allocation on the Customer Portal
-          theforeman.foreman.redhat_manifest:
-            name: "{{ allocation_name }}"
-            username: "{{ rh_username }}"
-            password: "{{ rh_password }}"
-            content_access_mode: org_environment
+          ansible.builtin.uri:
+            url: "{{ portal_api_base }}/subscription/consumers"
+            method: POST
+            url_username: "{{ rh_username }}"
+            url_password: "{{ rh_password }}"
+            force_basic_auth: true
             validate_certs: "{{ foreman_validate_certs }}"
+            body_format: json
+            headers:
+              Content-Type: application/json
+              Accept: application/json
+            body:
+              name: "{{ allocation_name }}"
+              type: satellite
+              contentAccessMode: org_environment
+              facts:
+                distributor_version: "{{ __allocation_version }}"
+                system.certificate_version: "3.2"
+            status_code: [200, 201]
+            return_content: true
           register: __portal_allocation_create
           no_log: true
 
         - name: Set allocation UUID from portal create
           ansible.builtin.set_fact:
-            __allocation_uuid: "{{ __portal_allocation_create.uuid }}"
+            __allocation_uuid: "{{ __portal_allocation_create.json.uuid }}"
             __allocation_display_name: "{{ allocation_name }}"
+            __allocation_created: true
+            __aap_already_attached: false
 
         - name: Assert portal create returned a UUID
           ansible.builtin.assert:
@@ -36,46 +112,21 @@
               - __allocation_uuid is defined
               - __allocation_uuid | length > 0
             fail_msg: >-
-              theforeman.foreman.redhat_manifest created allocation
-              "{{ allocation_name }}" but did not return a uuid.
+              Customer Portal created allocation "{{ allocation_name }}"
+              but did not return a uuid.
+
+        - name: Show created allocation
+          ansible.builtin.debug:
+            msg: >-
+              Created allocation name={{ allocation_name }}
+              uuid={{ __allocation_uuid }} — will attach AAP and download.
 
     - name: Create allocation via RHSM management API when portal credentials are absent
-      when: __allocation_uuid is not defined
+      when: (__allocation_uuid is not defined) or (__allocation_uuid | length == 0)
       block:
-        - name: List available Satellite versions
-          when: allocation_version | length == 0
-          ansible.builtin.uri:
-            url: "{{ rhsm_api_base }}/allocations/versions"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ __rhsm_access_token }}"
-            return_content: true
-          register: __allocation_versions
-          no_log: true
-
-        - name: Pick latest Satellite version when unset
-          when: allocation_version | length == 0
-          vars:
-            __version_body: "{{ __allocation_versions.json.body | default([]) }}"
-          ansible.builtin.set_fact:
-            __allocation_version: >-
-              {{
-                (
-                  __version_body
-                  | map(attribute='value')
-                  | list
-                  if (__version_body | length > 0 and __version_body[0] is mapping)
-                  else (__version_body | list)
-                )
-                | sort
-                | last
-                | default('sat-6.16', true)
-              }}
-
-        - name: Use configured allocation version
-          when: allocation_version | length > 0
-          ansible.builtin.set_fact:
-            __allocation_version: "{{ allocation_version }}"
+        - name: Ensure Satellite version is resolved
+          when: __allocation_version is not defined
+          ansible.builtin.include_tasks: resolve_version.yml
 
         - name: Create subscription allocation via RHSM API
           ansible.builtin.uri:
@@ -114,6 +165,14 @@
                 | default(__allocation_create.json.body.id)
               }}
             __allocation_display_name: "{{ allocation_name }}"
+            __allocation_created: true
+            __aap_already_attached: false
+
+        - name: Show created allocation
+          ansible.builtin.debug:
+            msg: >-
+              Created allocation name={{ allocation_name }}
+              uuid={{ __allocation_uuid }} — will attach AAP and download.
 
 - name: Assert allocation UUID is set
   ansible.builtin.assert:

@@ -1,0 +1,249 @@
+---
+# Attach AAP pools when the selected allocation does not already have AAP.
+# Never copies entitlements from other allocations.
+#
+# Pool IDs:
+#   1. explicit pool_ids
+#   2. Customer Portal owner pools whose productId == aap_sku (default MCT4701)
+
+- name: Skip attach when AAP entitlement is already present
+  when: >
+    (not (attach_subscriptions | bool))
+    or (
+      (__aap_already_attached | default(false) | bool)
+      and (not (force_attach_subscriptions | bool))
+    )
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        'attach_subscriptions=false — skipping attach.'
+        if not (attach_subscriptions | bool)
+        else (
+          'AAP entitlement already present on "'
+          ~ (__allocation_display_name | default(allocation_name))
+          ~ '" — skipping attach.'
+        )
+      }}
+
+- name: Attach AAP subscriptions when missing
+  when:
+    - attach_subscriptions | bool
+    - >
+      (force_attach_subscriptions | bool)
+      or (not (__aap_already_attached | default(false) | bool))
+  block:
+    - name: Require portal credentials to discover/attach pools
+      ansible.builtin.assert:
+        that:
+          - rh_username is defined
+          - rh_username | length > 0
+          - rh_password is defined
+          - rh_password | length > 0
+        fail_msg: >-
+          No AAP entitlement on "{{ __allocation_display_name | default(allocation_name) }}".
+          Attaching requires rh_username/rh_password (or set pool_ids and portal creds).
+
+    - name: Reset pool selection
+      ansible.builtin.set_fact:
+        __pools_to_attach: []
+        __matched_pool_names: []
+        __pool_source: ""
+
+    - name: Use explicit pool_ids when provided
+      when: (pool_ids | default([]) | length) > 0
+      ansible.builtin.set_fact:
+        __pools_to_attach: "{{ pool_ids }}"
+        __matched_pool_names: "{{ pool_ids }}"
+        __pool_source: explicit
+
+    - name: Discover attachable pools from the Customer Portal owner list
+      when: (__pools_to_attach | length) == 0
+      block:
+        - name: Resolve RHSM owner key
+          ansible.builtin.uri:
+            url: "{{ portal_api_base }}/subscription/users/{{ rh_username | urlencode }}/owners"
+            method: GET
+            url_username: "{{ rh_username }}"
+            url_password: "{{ rh_password }}"
+            force_basic_auth: true
+            validate_certs: "{{ foreman_validate_certs }}"
+            return_content: true
+          register: __portal_owners
+          no_log: true
+
+        - name: Set owner key
+          ansible.builtin.set_fact:
+            __rhsm_owner_key: "{{ (__portal_owners.json | first).key }}"
+
+        - name: List pools available to this allocation consumer
+          ansible.builtin.uri:
+            url: "{{ portal_api_base }}/subscription/owners/{{ __rhsm_owner_key }}/pools?consumer={{ __allocation_uuid }}&listall=true"
+            method: GET
+            url_username: "{{ rh_username }}"
+            url_password: "{{ rh_password }}"
+            force_basic_auth: true
+            validate_certs: "{{ foreman_validate_certs }}"
+            return_content: true
+            status_code: [200, 404]
+          register: __portal_pools
+          failed_when: false
+          no_log: true
+
+        - name: Fall back to owner pools without consumer filter
+          when: (__portal_pools.status | default(0)) != 200
+          ansible.builtin.uri:
+            url: "{{ portal_api_base }}/subscription/owners/{{ __rhsm_owner_key }}/pools"
+            method: GET
+            url_username: "{{ rh_username }}"
+            url_password: "{{ rh_password }}"
+            force_basic_auth: true
+            validate_certs: "{{ foreman_validate_certs }}"
+            return_content: true
+          register: __portal_pools_fallback
+          no_log: true
+
+        - name: Normalize and match owner pools by SKU (productId)
+          vars:
+            __raw: >-
+              {{
+                __portal_pools.json
+                if (__portal_pools.status | default(0)) == 200
+                else (__portal_pools_fallback.json | default([]))
+              }}
+            __list: >-
+              {{
+                __raw
+                if (__raw is sequence and __raw is not string and __raw is not mapping)
+                else []
+              }}
+            __matched: >-
+              {{
+                __list
+                | selectattr('productId', 'defined')
+                | selectattr('productId', 'equalto', aap_sku)
+                | list
+              }}
+          ansible.builtin.set_fact:
+            __portal_pool_list: "{{ __list }}"
+            __pools_to_attach: "{{ __matched | map(attribute='id') | list }}"
+            __matched_pool_names: >-
+              {{
+                __matched
+                | map(attribute='productName')
+                | list
+                | unique
+              }}
+            __pool_source: "owner-pools:{{ aap_sku }}"
+
+    - name: Fail when no matching pools were found
+      when: (__pools_to_attach | length) == 0
+      ansible.builtin.fail:
+        msg: >-
+          No Customer Portal pool found for SKU {{ aap_sku }} on
+          "{{ __allocation_display_name | default(allocation_name) }}".
+          Set pool_ids explicitly, or set aap_sku to a SKU available on this account.
+          Sample owner productId values:
+          {{
+            (__portal_pool_list | default([]) | map(attribute='productId') | list | unique)[:20]
+          }}
+          Sample product names:
+          {{
+            (__portal_pool_list | default([]) | map(attribute='productName') | list | unique)[:20]
+          }}
+
+    - name: Show pools that will be attached
+      ansible.builtin.debug:
+        msg: >-
+          Attaching SKU {{ aap_sku }} ({{ __pools_to_attach | length }} pool(s) from {{ __pool_source }})
+          to name={{ __allocation_display_name | default(allocation_name) }}
+          uuid={{ __allocation_uuid }}:
+          {{ __matched_pool_names }}
+
+    - name: Attach via theforeman.foreman.redhat_manifest
+      theforeman.foreman.redhat_manifest:
+        uuid: "{{ __allocation_uuid }}"
+        username: "{{ rh_username }}"
+        password: "{{ rh_password }}"
+        pool_id: "{{ item }}"
+        quantity: "{{ pool_quantity }}"
+        path: "{{ __aap_artifacts_dir }}/{{ manifest_filename }}"
+        content_access_mode: org_environment
+        validate_certs: "{{ foreman_validate_certs }}"
+      loop: "{{ __pools_to_attach }}"
+      register: __foreman_attach
+      failed_when: false
+      no_log: true
+
+    - name: Attach each pool via RHSM management API
+      ansible.builtin.uri:
+        url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/entitlements?pool={{ item }}&quantity={{ pool_quantity }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        status_code: [200, 201, 204, 400, 403, 404]
+        return_content: true
+      loop: "{{ __pools_to_attach }}"
+      register: __rhsm_attach
+      failed_when: false
+      no_log: true
+
+    - name: Fall back to Customer Portal attach (best-effort; 403 is common)
+      ansible.builtin.uri:
+        url: "{{ portal_api_base }}/subscription/consumers/{{ __allocation_uuid }}/entitlements?pool={{ item }}&quantity={{ pool_quantity }}"
+        method: POST
+        url_username: "{{ rh_username }}"
+        url_password: "{{ rh_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ foreman_validate_certs }}"
+        status_code: [200, 201, 204, 400, 403, 404]
+        return_content: true
+      loop: "{{ __pools_to_attach }}"
+      register: __portal_attach
+      failed_when: false
+      no_log: true
+
+    - name: Verify AAP entitlements were attached
+      ansible.builtin.uri:
+        url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}?include=entitlements"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ __rhsm_access_token }}"
+        return_content: true
+      register: __attach_verify
+      no_log: true
+
+    - name: Fail when allocation still has no AAP entitlement
+      vars:
+        __ents: "{{ __attach_verify.json.body.entitlementsAttached.value | default([]) }}"
+        __sku_ents: >-
+          {{
+            __ents
+            | selectattr('sku', 'defined')
+            | selectattr('sku', 'equalto', aap_sku)
+            | list
+          }}
+      ansible.builtin.assert:
+        that:
+          - (__sku_ents | length) > 0
+        fail_msg: >-
+          Attach ran but name={{ __allocation_display_name | default(allocation_name) }}
+          uuid={{ __allocation_uuid }} still has no entitlement for SKU {{ aap_sku }}.
+          source={{ __pool_source | default('?') }}
+          pools={{ __matched_pool_names | default(__pools_to_attach) }}
+          rhsm_statuses={{ __rhsm_attach.results | default([]) | map(attribute='status') | list }}
+          portal_statuses={{ __portal_attach.results | default([]) | map(attribute='status') | list }}.
+          Set pool_ids from the Customer Portal for SKU {{ aap_sku }}.
+
+    - name: Record successful attach
+      ansible.builtin.set_fact:
+        __aap_already_attached: true
+
+    - name: Show attached entitlement summary
+      vars:
+        __ents: "{{ __attach_verify.json.body.entitlementsAttached.value | default([]) }}"
+      ansible.builtin.debug:
+        msg: >-
+          name={{ __allocation_display_name | default(allocation_name) }}
+          uuid={{ __allocation_uuid }}
+          now has {{ __attach_verify.json.body.entitlementsAttachedQuantity }} entitlement(s):
+          {{ __ents | map(attribute='subscriptionName') | list }}.

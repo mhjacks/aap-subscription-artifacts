@@ -7,8 +7,8 @@
 # rh_password: "your-redhat-password"
 
 artifacts_dir: "~/Documents/aap-subscription-artifacts"
-allocation_name: aap-local
-reuse_existing_allocation: true
+allocation_name: new-aap-allocation
 create_allocation_if_missing: true
-enable_simple_content_access: true
+attach_subscriptions: true
+prefer_aap_entitled_allocation: false
 manifest_backend: rhsm_api

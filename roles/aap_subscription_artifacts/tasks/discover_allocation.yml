@@ -1,7 +1,16 @@
 ---
-# List allocations and select one to download (SCA: no pool attach).
-# Preference: allocation_uuid → allocation_name → sole existing allocation.
-# Sets: __selected_allocation, __allocation_uuid, __allocation_choices
+# Resolve which allocation to export.
+#
+# IMPORTANT: GET /allocations often returns entitlementsAttachedQuantity=null
+# even when entitlements exist — always probe with ?include=entitlements.
+#
+# When allocation_name is given:
+#   - exists + has AAP  → use it, skip attach
+#   - exists + no AAP   → use it, attach
+#   - missing           → create it (ensure), attach, download
+#
+# prefer_aap_entitled_allocation only applies when the named allocation is
+# missing and create_allocation_if_missing is false (export any ready AAP alloc).
 
 - name: List subscription allocations
   ansible.builtin.uri:
@@ -13,15 +22,90 @@
   register: __allocations_list
   no_log: true
 
-- name: Build public allocation choices (name + uuid)
+- name: Reset discovery facts
   ansible.builtin.set_fact:
-    __allocation_choices: "{{ __allocations_list.json.body | default([]) | json_query('[].{name: name, uuid: uuid}') }}"
+    __allocation_choices: >-
+      {{
+        __allocations_list.json.body | default([])
+        | json_query('[].{name: name, uuid: uuid, version: version, entitlements: entitlementsAttachedQuantity}')
+      }}
     __selected_allocation: {}
+    __allocation_uuid: ""
+    __allocation_display_name: ""
+    __aap_entitled_allocations: []
+    __aap_already_attached: false
 
-- name: Prefer allocation with matching name
+- name: Apply explicit allocation_uuid override
   when:
+    - allocation_uuid is defined
+    - allocation_uuid | length > 0
+  block:
+    - name: Resolve allocation record for explicit UUID
+      ansible.builtin.set_fact:
+        __selected_allocation: >-
+          {{
+            (__allocations_list.json.body | default([]))
+            | selectattr('uuid', 'equalto', allocation_uuid)
+            | list
+            | first
+            | default({'uuid': allocation_uuid}, true)
+          }}
+
+    - name: Set UUID from override
+      ansible.builtin.set_fact:
+        __allocation_uuid: "{{ allocation_uuid }}"
+        __allocation_display_name: "{{ __selected_allocation.name | default(allocation_name) }}"
+
+- name: Probe every allocation for attached entitlements
+  when: (__allocations_list.json.body | default([]) | length) > 0
+  ansible.builtin.uri:
+    url: "{{ rhsm_api_base }}/allocations/{{ item.uuid }}?include=entitlements"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ __rhsm_access_token }}"
+    return_content: true
+  loop: "{{ __allocations_list.json.body | default([]) }}"
+  loop_control:
+    label: "{{ item.name | default(item.uuid) }}"
+  register: __entitlement_probes
+  no_log: true
+
+- name: Collect allocations that already have the target AAP SKU
+  when:
+    - __entitlement_probes is defined
+    - __entitlement_probes.results is defined
+    - >
+      (
+        (
+          item.json.body.entitlementsAttached.value
+          | default([])
+          | selectattr('sku', 'defined')
+          | selectattr('sku', 'equalto', aap_sku)
+          | list
+          | length
+        ) > 0
+        or
+        (
+          item.json.body.entitlementsAttached.value
+          | default([])
+          | selectattr('subscriptionName', 'defined')
+          | selectattr('subscriptionName', 'search', pool_product_regex)
+          | list
+          | length
+        ) > 0
+      )
+  ansible.builtin.set_fact:
+    __aap_entitled_allocations: "{{ __aap_entitled_allocations + [item.json.body] }}"
+  loop: "{{ __entitlement_probes.results | default([]) }}"
+  loop_control:
+    label: "{{ item.json.body.name | default(item.item.uuid | default('probe')) }}"
+  no_log: true
+
+- name: Select allocation by name when it exists
+  when:
+    - (__allocation_uuid | length) == 0
     - reuse_existing_allocation | bool
-    - (__allocations_list.json.body | default([]) | length) > 0
+    - allocation_name | length > 0
   ansible.builtin.set_fact:
     __selected_allocation: >-
       {{
@@ -33,44 +117,101 @@
         | default({}, true)
       }}
 
-- name: Fall back to the only existing allocation
+- name: Enrich named selection with probed entitlement details
   when:
-    - reuse_existing_allocation | bool
-    - __selected_allocation.uuid is not defined
-    - (__allocations_list.json.body | default([]) | length) == 1
+    - (__allocation_uuid | length) == 0
+    - __selected_allocation.uuid is defined
+    - (__aap_entitled_allocations | length) > 0
   ansible.builtin.set_fact:
-    __selected_allocation: "{{ __allocations_list.json.body | first }}"
+    __selected_allocation: >-
+      {{
+        __aap_entitled_allocations
+        | selectattr('uuid', 'equalto', __selected_allocation.uuid)
+        | list
+        | first
+        | default(__selected_allocation, true)
+      }}
+
+- name: Prefer any AAP-entitled allocation only when named is missing and create is off
+  when:
+    - (__allocation_uuid | length) == 0
+    - prefer_aap_entitled_allocation | bool
+    - not (create_allocation_if_missing | bool)
+    - __selected_allocation.uuid is not defined
+    - (__aap_entitled_allocations | length) > 0
+  ansible.builtin.set_fact:
+    __selected_allocation: "{{ __aap_entitled_allocations | first }}"
 
 - name: Set allocation UUID from selection when present
-  when: __selected_allocation.uuid is defined
+  when:
+    - (__allocation_uuid | length) == 0
+    - __selected_allocation.uuid is defined
   ansible.builtin.set_fact:
     __allocation_uuid: "{{ __selected_allocation.uuid }}"
     __allocation_display_name: "{{ __selected_allocation.name | default(allocation_name) }}"
 
-- name: Apply explicit allocation_uuid override
+- name: Refresh selection details from RHSM for the selected UUID
+  when: (__allocation_uuid | length) > 0
+  ansible.builtin.uri:
+    url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}?include=entitlements"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ __rhsm_access_token }}"
+    return_content: true
+  register: __allocation_name_refresh
+  no_log: true
+
+- name: Apply refreshed allocation details and AAP-attached flag
   when:
-    - allocation_uuid is defined
-    - allocation_uuid | length > 0
+    - (__allocation_uuid | length) > 0
+    - __allocation_name_refresh is defined
+    - (__allocation_name_refresh.status | default(0)) == 200
+  vars:
+    __body: "{{ __allocation_name_refresh.json.body }}"
+    __ents: "{{ __body.entitlementsAttached.value | default([]) }}"
+    __sku_ents: >-
+      {{
+        __ents
+        | selectattr('sku', 'defined')
+        | selectattr('sku', 'equalto', aap_sku)
+        | list
+      }}
   ansible.builtin.set_fact:
-    __allocation_uuid: "{{ allocation_uuid }}"
-    __allocation_display_name: "{{ allocation_name }}"
+    __allocation_display_name: "{{ __body.name | default(__allocation_display_name) | default(allocation_name) }}"
+    __selected_allocation: "{{ __selected_allocation | combine(__body) }}"
+    __aap_already_attached: "{{ (__sku_ents | length) > 0 }}"
+
+- name: Mark AAP attached when selection is in the entitled list
+  when:
+    - not (__aap_already_attached | bool)
+    - (__allocation_uuid | length) > 0
+    - (__aap_entitled_allocations | selectattr('uuid', 'equalto', __allocation_uuid) | list | length) > 0
+  ansible.builtin.set_fact:
+    __aap_already_attached: true
 
 - name: Fail clearly when no allocation was selected and create is disabled
   when:
-    - __allocation_uuid is not defined
+    - (__allocation_uuid | length) == 0
     - not (create_allocation_if_missing | bool)
   ansible.builtin.fail:
     msg: >-
-      No allocation matched allocation_name="{{ allocation_name }}"
-      {{ 'among ' ~ (__allocations_list.json.body | default([]) | length) ~ ' existing allocations' }}.
-      Set allocation_name or allocation_uuid to download an existing SCA manifest,
-      or set create_allocation_if_missing=true to create "{{ allocation_name }}".
+      Allocation "{{ allocation_name }}" was not found and
+      create_allocation_if_missing=false.
       Available: {{ __allocation_choices }}
+      AAP-entitled: {{ __aap_entitled_allocations | map(attribute='name') | list }}
 
 - name: Show allocation discovery result
-  when: __allocation_uuid is defined
   ansible.builtin.debug:
     msg: >-
-      Selected allocation "{{ __allocation_display_name | default(allocation_name) }}"
-      ({{ __allocation_uuid }}) for SCA manifest download.
-      Available allocations: {{ __allocation_choices }}
+      {{
+        (
+          'Allocation name=' ~ (__allocation_display_name | default(allocation_name))
+          ~ ' uuid=' ~ __allocation_uuid
+          ~ ' aap_attached=' ~ (__aap_already_attached | string)
+        )
+        if (__allocation_uuid | length) > 0
+        else (
+          'Allocation "' ~ allocation_name ~ '" does not exist — will create, attach AAP, and download.'
+        )
+      }}.
+      AAP-entitled allocations (informational): {{ __aap_entitled_allocations | map(attribute='name') | list }}.

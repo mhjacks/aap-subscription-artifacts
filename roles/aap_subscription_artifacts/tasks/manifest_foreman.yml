@@ -31,9 +31,20 @@
 - name: Show allocation selection
   ansible.builtin.debug:
     msg: >-
-      Downloading SCA manifest for allocation
-      "{{ __allocation_display_name | default(allocation_name) }}"
-      ({{ __allocation_uuid }}).
+      Allocation name={{ __allocation_display_name | default(allocation_name) }}
+      uuid={{ __allocation_uuid }}
+      aap_attached={{ __aap_already_attached | default(false) }}
+
+- name: Attach AAP subscriptions when missing
+  ansible.builtin.include_tasks: attach_subscriptions.yml
+
+- name: Assert selected allocation has an AAP entitlement before export
+  ansible.builtin.assert:
+    that:
+      - __aap_already_attached | default(false) | bool
+    fail_msg: >-
+      Refusing to export a manifest without an AAP entitlement on
+      "{{ __allocation_display_name | default(allocation_name) }}".
 
 - name: Enable Simple Content Access
   ansible.builtin.include_tasks: enable_sca.yml
@@ -53,4 +64,5 @@
     msg: >-
       Wrote manifest via theforeman.foreman.redhat_manifest to
       {{ __aap_artifacts_dir }}/{{ manifest_filename }}
-      (uuid {{ __allocation_uuid }}).
+      from allocation name={{ __allocation_display_name | default(allocation_name) }}
+      uuid={{ __allocation_uuid }}.
