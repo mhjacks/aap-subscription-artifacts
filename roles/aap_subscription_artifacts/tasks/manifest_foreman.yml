@@ -38,6 +38,7 @@
 
 - name: Ensure Red Hat Entitlement Platform CA is present
   ansible.builtin.include_tasks: ensure_rhsm_ca.yml
+  when: foreman_validate_certs | bool
 
 - name: Attach AAP pool before download when requested
   when: ensure_aap_pool | bool

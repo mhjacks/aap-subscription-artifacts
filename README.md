@@ -21,7 +21,11 @@ ansible-galaxy collection install -r requirements.yml
 
 You also need `rh_username` / `rh_password` for the Customer Portal.
 
-`theforeman.foreman.redhat_manifest` hardcodes TLS validation against `/etc/rhsm/ca/redhat-uep.pem` (Red Hat Entitlement Platform CA). That file normally comes from the RHEL package `subscription-manager-rhsm-certificates`, but there is no requirement to use RHEL: the role downloads a public copy from [Katello's mirror](https://raw.githubusercontent.com/Katello/katello/master/ca/redhat-uep.pem) and installs it to that path (needs `--become`). Override with `rhsm_uep_ca_url` if you prefer another source.
+`theforeman.foreman.redhat_manifest` talks to `subscription.rhsm.redhat.com` and, when `validate_certs=true`, hardcodes `/etc/rhsm/ca/redhat-uep.pem`. That CA is mirrored publicly at [Katello's redhat-uep.pem](https://raw.githubusercontent.com/Katello/katello/master/ca/redhat-uep.pem); the role can install it with `--become`.
+
+On current OpenSSL/Python, verification often still fails with `Basic Constraints of CA cert not marked critical`. For that reason `foreman_validate_certs` defaults to `false`. Set it to `true` only if your runtime accepts that CA.
+
+For verified TLS without the UEP CA, use the default `manifest_backend=rhsm_api` (offline token → `api.access.redhat.com`).
 
 ## Quick start
 
