@@ -70,7 +70,25 @@ Fetch will:
 
 By default the role does **not** create allocations (`create_allocation_if_missing: false`) and does **not** attach pools (`ensure_aap_pool: false`). If you already have an allocation, it just downloads its manifest.
 
-If several allocations exist and none match, the playbook lists them and asks you to set `allocation_name` or `allocation_uuid`.
+### SCA (Simple Content Access) — console-compatible create
+
+With SCA you do **not** pick pools. The API equivalent of the Hybrid Cloud Console flow is:
+
+1. `POST /allocations?Name=...&version=...` — create the Satellite allocation
+2. `PUT /allocations/{uuid}` with `{"simpleContentAccess": "enabled"}` — enable SCA
+3. `GET /allocations/{uuid}/export` — export the manifest zip
+
+The role does steps 2–3 automatically (`enable_simple_content_access: true`). For step 1 when nothing exists yet:
+
+```bash
+ansible-playbook playbooks/fetch_artifacts.yml \
+  -e create_allocation_if_missing=true \
+  -e allocation_name=aap-local
+```
+
+Leave `ensure_aap_pool=false` (default). Only set `ensure_aap_pool=true` for a legacy entitlement-mode allocation that still needs an attached AAP pool.
+
+Via `theforeman.foreman.redhat_manifest`, SCA is `content_access_mode: org_environment` (already set on the foreman backend) without a `pool_id`.
 
 ### Download via `theforeman.foreman`
 
@@ -111,7 +129,8 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 | `allocation_version` | latest from API | Satellite version for new allocations (RHSM API backend) |
 | `reuse_existing_aap_allocation` | `true` | Prefer existing allocations for download |
 | `create_allocation_if_missing` | `false` | Create `allocation_name` only when none can be selected |
-| `ensure_aap_pool` | `false` | Attach/ensure AAP pool before export |
+| `enable_simple_content_access` | `true` | PUT `simpleContentAccess=enabled` (SCA; no pools needed) |
+| `ensure_aap_pool` | `false` | Attach AAP pool (legacy entitlement mode only) |
 | `aap_pool_id` | unset | Explicit pool id (optional; auto-discovered when ensuring pool) |
 | `aap_pool_name_regex` | `(?i)ansible.?automation.?platform` | Pool product name match |
 | `aap_pool_quantity` | `1` | Quantity to attach |

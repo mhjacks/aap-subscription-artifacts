@@ -64,6 +64,33 @@
         __allocation_display_name: "{{ allocation_name }}"
         __reuse_existing_aap: false
         __aap_already_attached: false
+        __allocation_just_created: true
+
+- name: Enable Simple Content Access on the allocation
+  when:
+    - enable_simple_content_access | bool
+    - __allocation_uuid is defined
+  ansible.builtin.uri:
+    url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ __rhsm_access_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      simpleContentAccess: enabled
+    status_code: [200, 204]
+  register: __sca_enable
+  no_log: true
+
+- name: Note Simple Content Access enabled
+  when:
+    - enable_simple_content_access | bool
+    - __allocation_uuid is defined
+  ansible.builtin.debug:
+    msg: >-
+      Ensured simpleContentAccess=enabled on allocation {{ __allocation_uuid }}
+      (SCA: export without attaching pools, same as the Hybrid Cloud Console flow).
 
 - name: Assert allocation UUID is set
   ansible.builtin.assert:

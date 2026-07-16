@@ -35,8 +35,11 @@ allocation_version: ""
 reuse_existing_aap_allocation: true
 # When false (default), never create a new allocation — only download existing.
 create_allocation_if_missing: false
-# When true, attach/ensure an AAP pool before export (foreman + rhsm_api).
-# Default false: if an allocation exists, just download its manifest.
+# SCA mode: enable simpleContentAccess on the allocation (PUT ... simpleContentAccess=enabled).
+# Matches Hybrid Cloud Console manifests — no pool attach required for export.
+enable_simple_content_access: true
+# When true, attach/ensure an AAP pool before export (legacy entitlement workflow).
+# Leave false under SCA; the console does not require picking pools either.
 ensure_aap_pool: false
 aap_pool_id: ""
 aap_pool_name_regex: "(?i)ansible.?automation.?platform"
