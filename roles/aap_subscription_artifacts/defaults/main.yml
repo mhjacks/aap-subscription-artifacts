@@ -41,12 +41,7 @@ enable_simple_content_access: true
 export_retries: 30
 export_delay: 10
 
-# Required by theforeman.foreman.redhat_manifest for portal TLS (hardcoded path)
-rhsm_uep_ca_path: /etc/rhsm/ca/redhat-uep.pem
-# Public copy of the cert from subscription-manager-rhsm-certificates (no RHEL package needed)
-rhsm_uep_ca_url: https://raw.githubusercontent.com/Katello/katello/master/ca/redhat-uep.pem
-# Passed to theforeman.foreman.redhat_manifest validate_certs.
-# Default false: modern OpenSSL/Python reject redhat-uep.pem with
-# "Basic Constraints of CA cert not marked critical". Prefer manifest_backend=rhsm_api
-# for verified TLS via api.access.redhat.com (public CAs + offline token).
+# theforeman.foreman.redhat_manifest portal TLS. Default false: avoids needing
+# /etc/rhsm/ca/redhat-uep.pem (and modern OpenSSL rejects that CA anyway).
+# Prefer manifest_backend=rhsm_api for verified TLS via api.access.redhat.com.
 foreman_validate_certs: false

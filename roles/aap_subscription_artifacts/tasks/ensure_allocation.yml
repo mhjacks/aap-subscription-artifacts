@@ -16,10 +16,6 @@
         - rh_password is defined
         - rh_password | length > 0
       block:
-        - name: Ensure Red Hat Entitlement Platform CA when validating portal TLS
-          ansible.builtin.include_tasks: ensure_rhsm_ca.yml
-          when: foreman_validate_certs | bool
-
         - name: Create named SCA allocation on the Customer Portal
           theforeman.foreman.redhat_manifest:
             name: "{{ allocation_name }}"
