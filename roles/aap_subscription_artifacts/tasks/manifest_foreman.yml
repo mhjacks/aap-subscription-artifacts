@@ -36,6 +36,9 @@
       "{{ __allocation_display_name | default(allocation_name) }}"
       ({{ __allocation_uuid }}).
 
+- name: Ensure Red Hat Entitlement Platform CA is present
+  ansible.builtin.include_tasks: ensure_rhsm_ca.yml
+
 - name: Attach AAP pool before download when requested
   when: ensure_aap_pool | bool
   block:
