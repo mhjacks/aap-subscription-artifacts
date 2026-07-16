@@ -1,9 +1,11 @@
 ---
-# Ensure __allocation_uuid is set, creating a new allocation via RHSM when needed.
+# Ensure __allocation_uuid is set. Creates only when create_allocation_if_missing.
 # Requires __rhsm_access_token.
 
-- name: Create subscription allocation when none selected
-  when: __allocation_uuid is not defined
+- name: Create subscription allocation when missing and allowed
+  when:
+    - __allocation_uuid is not defined
+    - create_allocation_if_missing | bool
   block:
     - name: List available Satellite versions
       when: allocation_version | length == 0
@@ -68,4 +70,8 @@
     that:
       - __allocation_uuid is defined
       - __allocation_uuid | length > 0
-    fail_msg: Failed to resolve subscription allocation UUID.
+    fail_msg: >-
+      No subscription allocation selected for download.
+      Set allocation_name or allocation_uuid to an existing allocation, or set
+      create_allocation_if_missing=true to create "{{ allocation_name }}".
+      Available allocations: {{ __allocation_choices | default([]) }}

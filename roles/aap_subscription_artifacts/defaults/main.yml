@@ -31,9 +31,13 @@ allocation_name: aap-local
 allocation_uuid: ""
 # Empty = pick latest version from /allocations/versions
 allocation_version: ""
-# When true, scan existing allocations for one that already has an AAP
-# subscription attached and export that instead of always creating/attaching.
+# When true, scan/reuse existing allocations and download their manifest.
 reuse_existing_aap_allocation: true
+# When false (default), never create a new allocation — only download existing.
+create_allocation_if_missing: false
+# When true, attach/ensure an AAP pool before export (foreman + rhsm_api).
+# Default false: if an allocation exists, just download its manifest.
+ensure_aap_pool: false
 aap_pool_id: ""
 aap_pool_name_regex: "(?i)ansible.?automation.?platform"
 aap_pool_quantity: 1

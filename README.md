@@ -58,12 +58,13 @@ ansible-playbook playbooks/fetch_artifacts.yml \
 Fetch will:
 
 1. Exchange the offline token for an RHSM API access token
-2. Scan existing subscription allocations for one that already has an AAP subscription attached
-3. If found, export and download that manifest (prefers `allocation_name` when it is AAP-entitled)
-4. Otherwise create (or reuse by name) allocation `aap-local`, attach an AAP pool, then export
-5. Write / refresh `automation-hub-token`
+2. Find an existing subscription allocation (AAP-entitled preferred, then `allocation_name`, then the sole allocation if only one exists)
+3. Download/export that allocation's manifest
+4. Write / refresh `automation-hub-token`
 
-Set `reuse_existing_aap_allocation: false` to skip the scan and always use the named allocation create/attach path.
+By default the role does **not** create allocations (`create_allocation_if_missing: false`) and does **not** attach pools (`ensure_aap_pool: false`). If you already have an allocation, it just downloads its manifest.
+
+If several allocations exist and none match, the playbook lists them and asks you to set `allocation_name` or `allocation_uuid`.
 
 ### Download via `theforeman.foreman`
 
@@ -76,7 +77,7 @@ ansible-playbook playbooks/fetch_artifacts.yml \
   -e @creds.yml
 ```
 
-With an offline token present, the role discovers or creates the allocation over the RHSM API, locates an AAP pool by name match (`aap_pool_name_regex`), then downloads with `theforeman.foreman.redhat_manifest`. You do not need to look up `aap_pool_id` in the UI unless auto-discovery fails.
+With an offline token present, the role discovers an existing allocation over the RHSM API and downloads it with `theforeman.foreman.redhat_manifest`. Set `allocation_name` or `allocation_uuid` if you have more than one allocation. Use `create_allocation_if_missing=true` / `ensure_aap_pool=true` only when you intentionally want create/attach.
 
 ### One-shot (generate + fetch)
 
@@ -102,8 +103,10 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 | `allocation_name` | `aap-local` | Preferred allocation name (create target / preference among AAP-entitled) |
 | `allocation_uuid` | unset | Explicit allocation UUID to export |
 | `allocation_version` | latest from API | Satellite version for new allocations (RHSM API backend) |
-| `reuse_existing_aap_allocation` | `true` | Reuse any existing allocation that already has AAP attached |
-| `aap_pool_id` | unset | Explicit pool id (optional; auto-discovered from allocation pools) |
+| `reuse_existing_aap_allocation` | `true` | Prefer existing allocations for download |
+| `create_allocation_if_missing` | `false` | Create `allocation_name` only when none can be selected |
+| `ensure_aap_pool` | `false` | Attach/ensure AAP pool before export |
+| `aap_pool_id` | unset | Explicit pool id (optional; auto-discovered when ensuring pool) |
 | `aap_pool_name_regex` | `(?i)ansible.?automation.?platform` | Pool product name match |
 | `aap_pool_quantity` | `1` | Quantity to attach |
 | `manifest_backend` | `rhsm_api` | `rhsm_api` or `foreman` (`satellite_module` alias) |

@@ -20,8 +20,8 @@
         )
       }}
 
-- name: Ensure AAP pool is attached when not already present
-  when: not (__aap_already_attached | default(false) | bool)
+- name: Ensure AAP pool is attached when requested
+  when: ensure_aap_pool | bool
   block:
     - name: Get allocation details including attached entitlements
       ansible.builtin.uri:
