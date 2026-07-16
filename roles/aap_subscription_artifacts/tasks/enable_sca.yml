@@ -1,0 +1,32 @@
+---
+# Enable SCA after subscriptions are on the allocation.
+
+- name: Enable Simple Content Access on the allocation
+  when: enable_simple_content_access | bool
+  ansible.builtin.uri:
+    url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ __rhsm_access_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      simpleContentAccess: enabled
+    status_code: [200, 204]
+  register: __sca_enable
+  failed_when: false
+  no_log: true
+
+- name: Note Simple Content Access enable result
+  when: enable_simple_content_access | bool
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        'Ensured simpleContentAccess=enabled on allocation ' ~ __allocation_uuid
+        if (__sca_enable.status | default(0)) in [200, 204]
+        else (
+          'Could not PUT simpleContentAccess on ' ~ __allocation_uuid
+          ~ ' (HTTP ' ~ (__sca_enable.status | default('n/a'))
+          ~ '); continuing — portal create may already be SCA.'
+        )
+      }}
