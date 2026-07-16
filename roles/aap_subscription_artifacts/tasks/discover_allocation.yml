@@ -55,16 +55,17 @@
     __allocation_uuid: "{{ allocation_uuid }}"
     __allocation_display_name: "{{ allocation_name }}"
 
-- name: Fail clearly when multiple allocations exist and none was selected
+- name: Fail clearly when no allocation was selected and create is disabled
   when:
     - __allocation_uuid is not defined
-    - (__allocations_list.json.body | default([]) | length) > 1
+    - not (create_allocation_if_missing | bool)
   ansible.builtin.fail:
     msg: >-
-      Found {{ __allocations_list.json.body | length }} existing allocations but
-      none matched allocation_name="{{ allocation_name }}". Set allocation_name
-      or allocation_uuid to download an existing SCA manifest (create is not
-      attempted by default). Available: {{ __allocation_choices }}
+      No allocation matched allocation_name="{{ allocation_name }}"
+      {{ 'among ' ~ (__allocations_list.json.body | default([]) | length) ~ ' existing allocations' }}.
+      Set allocation_name or allocation_uuid to download an existing SCA manifest,
+      or set create_allocation_if_missing=true to create "{{ allocation_name }}".
+      Available: {{ __allocation_choices }}
 
 - name: Show allocation discovery result
   when: __allocation_uuid is defined

@@ -33,8 +33,8 @@ allocation_uuid: ""
 allocation_version: ""
 # Prefer an existing allocation for download when possible
 reuse_existing_allocation: true
-# When false (default), never create a new allocation — only download existing
-create_allocation_if_missing: false
+# Create allocation_name when it does not already exist
+create_allocation_if_missing: true
 # Always enable SCA on the allocation (console-compatible; no pools)
 enable_simple_content_access: true
 

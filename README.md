@@ -68,7 +68,7 @@ Fetch will:
 3. Ensure `simpleContentAccess=enabled` and export the manifest zip
 4. Write / refresh `automation-hub-token`
 
-By default the role does **not** create allocations (`create_allocation_if_missing: false`). If you already have an allocation, it just downloads its manifest. SCA is always used — there is no pool-attach path.
+By default the role reuses `allocation_name` when it exists, otherwise **creates** it (`create_allocation_if_missing: true`), enables SCA, and exports the manifest.
 
 ### Create an SCA allocation (console-compatible)
 
@@ -80,7 +80,6 @@ Same flow as the Hybrid Cloud Console (no pool picking):
 
 ```bash
 ansible-playbook playbooks/fetch_artifacts.yml \
-  -e create_allocation_if_missing=true \
   -e allocation_name=aap-local
 ```
 
@@ -122,7 +121,7 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 | `allocation_uuid` | unset | Explicit allocation UUID to export |
 | `allocation_version` | latest from API | Satellite version for new allocations |
 | `reuse_existing_allocation` | `true` | Prefer existing allocations for download |
-| `create_allocation_if_missing` | `false` | Create `allocation_name` when none can be selected |
+| `create_allocation_if_missing` | `true` | Create `allocation_name` when it does not already exist |
 | `enable_simple_content_access` | `true` | PUT `simpleContentAccess=enabled` |
 | `manifest_backend` | `rhsm_api` | `rhsm_api` or `foreman` (`satellite_module` alias) |
 | `open_token_urls` | `true` | Open browser during interactive generate |
