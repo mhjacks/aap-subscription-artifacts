@@ -3,7 +3,7 @@
 Ansible playbooks to obtain local credentials for Ansible Automation Platform (AAP):
 
 1. **Red Hat offline token** (also used as the Automation Hub token)
-2. **AAP subscription manifest** (`.zip`) from a Satellite-style subscription allocation
+2. **AAP subscription manifest** (`.zip`) from an SCA Satellite-style allocation
 
 Artifacts are written under `~/Documents/aap-subscription-artifacts/` by default.
 
@@ -64,31 +64,25 @@ ansible-playbook playbooks/fetch_artifacts.yml \
 Fetch will:
 
 1. Exchange the offline token for an RHSM API access token
-2. Find an existing subscription allocation (AAP-entitled preferred, then `allocation_name`, then the sole allocation if only one exists)
-3. Download/export that allocation's manifest
+2. Find an existing SCA allocation (`allocation_name`, else the sole allocation if only one exists)
+3. Ensure `simpleContentAccess=enabled` and export the manifest zip
 4. Write / refresh `automation-hub-token`
 
-By default the role does **not** create allocations (`create_allocation_if_missing: false`) and does **not** attach pools (`ensure_aap_pool: false`). If you already have an allocation, it just downloads its manifest.
+By default the role does **not** create allocations (`create_allocation_if_missing: false`). If you already have an allocation, it just downloads its manifest. SCA is always used — there is no pool-attach path.
 
-### SCA (Simple Content Access) — console-compatible create
+### Create an SCA allocation (console-compatible)
 
-With SCA you do **not** pick pools. The API equivalent of the Hybrid Cloud Console flow is:
+Same flow as the Hybrid Cloud Console (no pool picking):
 
-1. `POST /allocations?Name=...&version=...` — create the Satellite allocation
-2. `PUT /allocations/{uuid}` with `{"simpleContentAccess": "enabled"}` — enable SCA
-3. `GET /allocations/{uuid}/export` — export the manifest zip
-
-The role does steps 2–3 automatically (`enable_simple_content_access: true`). For step 1 when nothing exists yet:
+1. `POST /allocations?Name=...&version=...`
+2. `PUT /allocations/{uuid}` with `{"simpleContentAccess": "enabled"}`
+3. `GET /allocations/{uuid}/export`
 
 ```bash
 ansible-playbook playbooks/fetch_artifacts.yml \
   -e create_allocation_if_missing=true \
   -e allocation_name=aap-local
 ```
-
-Leave `ensure_aap_pool=false` (default). Only set `ensure_aap_pool=true` for a legacy entitlement-mode allocation that still needs an attached AAP pool.
-
-Via `theforeman.foreman.redhat_manifest`, SCA is `content_access_mode: org_environment` (already set on the foreman backend) without a `pool_id`.
 
 ### Download via `theforeman.foreman`
 
@@ -101,7 +95,7 @@ ansible-playbook playbooks/fetch_artifacts.yml \
   -e @creds.yml
 ```
 
-With an offline token present, the role discovers an existing allocation over the RHSM API and downloads it with `theforeman.foreman.redhat_manifest`. Set `allocation_name` or `allocation_uuid` if you have more than one allocation. Use `create_allocation_if_missing=true` / `ensure_aap_pool=true` only when you intentionally want create/attach.
+Uses `content_access_mode: org_environment` (SCA). Set `allocation_name` or `allocation_uuid` if you have more than one allocation.
 
 ### One-shot (generate + fetch)
 
@@ -124,18 +118,15 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 | `rh_offline_token` | (file) | Offline token; falls back to `rh-offline-token` file |
 | `rh_username` / `rh_password` | unset | Password-grant generate; **required** for `manifest_backend=foreman` |
 | `artifacts_dir` | `~/Documents/aap-subscription-artifacts` | Output directory |
-| `allocation_name` | `aap-local` | Preferred allocation name (create target / preference among AAP-entitled) |
+| `allocation_name` | `aap-local` | Preferred allocation name |
 | `allocation_uuid` | unset | Explicit allocation UUID to export |
-| `allocation_version` | latest from API | Satellite version for new allocations (RHSM API backend) |
-| `reuse_existing_aap_allocation` | `true` | Prefer existing allocations for download |
-| `create_allocation_if_missing` | `false` | Create `allocation_name` only when none can be selected |
-| `enable_simple_content_access` | `true` | PUT `simpleContentAccess=enabled` (SCA; no pools needed) |
-| `ensure_aap_pool` | `false` | Attach AAP pool (legacy entitlement mode only) |
-| `aap_pool_id` | unset | Explicit pool id (optional; auto-discovered when ensuring pool) |
-| `aap_pool_name_regex` | `(?i)ansible.?automation.?platform` | Pool product name match |
-| `aap_pool_quantity` | `1` | Quantity to attach |
+| `allocation_version` | latest from API | Satellite version for new allocations |
+| `reuse_existing_allocation` | `true` | Prefer existing allocations for download |
+| `create_allocation_if_missing` | `false` | Create `allocation_name` when none can be selected |
+| `enable_simple_content_access` | `true` | PUT `simpleContentAccess=enabled` |
 | `manifest_backend` | `rhsm_api` | `rhsm_api` or `foreman` (`satellite_module` alias) |
 | `open_token_urls` | `true` | Open browser during interactive generate |
+| `foreman_validate_certs` | `false` | Portal TLS verify for theforeman backend |
 
 ## Outputs
 
@@ -143,7 +134,7 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 |------|---------|
 | `rh-offline-token` | Reusable Red Hat offline token |
 | `automation-hub-token` | Same token for Hub / `ansible-galaxy` / Validated Patterns |
-| `aap-manifest.zip` | Subscription manifest for AAP entitlement |
+| `aap-manifest.zip` | SCA subscription manifest for AAP |
 
 These paths match the shapes expected by [aap-starter-kit](https://github.com/validatedpatterns/aap-starter-kit) `values-secret` (`aap-manifest` + `automation-hub-token`). This repo does **not** write `values-secret.yaml` for you.
 

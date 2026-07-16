@@ -1,5 +1,5 @@
 ---
-# RHSM API backend: discover/create/attach, then export via management API.
+# RHSM API backend: discover or create an SCA allocation, then export.
 
 - name: Discover existing allocations
   ansible.builtin.include_tasks: discover_allocation.yml
@@ -10,66 +10,8 @@
 - name: Show allocation selection
   ansible.builtin.debug:
     msg: >-
-      {{
-        'Reusing existing AAP-entitled allocation "' ~ (__allocation_display_name | default(allocation_name))
-        ~ '" (' ~ __allocation_uuid ~ '); skipping pool attach.'
-        if (__reuse_existing_aap | default(false) | bool)
-        else (
-          'Using allocation "' ~ (__allocation_display_name | default(allocation_name))
-          ~ '" (' ~ __allocation_uuid ~ ').'
-        )
-      }}
-
-- name: Ensure AAP pool is attached when requested
-  when: ensure_aap_pool | bool
-  block:
-    - name: Get allocation details including attached entitlements
-      ansible.builtin.uri:
-        url: "{{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}?include=entitlements"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ __rhsm_access_token }}"
-        return_content: true
-      register: __allocation_details
-      no_log: true
-
-    - name: Resolve AAP pool id
-      ansible.builtin.include_tasks: resolve_aap_pool.yml
-
-    - name: Collect attached entitlement pool ids
-      vars:
-        __ents: >-
-          {{
-            __allocation_details.json.body.entitlementsAttached.value
-            | default(__allocation_details.json.body.entitlementsAttached, true)
-            | default(__allocation_details.json.body.entitlements, true)
-            | default([], true)
-          }}
-      ansible.builtin.set_fact:
-        __attached_pool_ids: >-
-          {{
-            (__ents | map(attribute='poolId') | list)
-            + (__ents | map(attribute='pool') | list)
-            + (__ents | map(attribute='id') | list)
-          }}
-
-    - name: Attach AAP pool to allocation when missing
-      when: __aap_pool_id not in __attached_pool_ids
-      ansible.builtin.uri:
-        url: >-
-          {{ rhsm_api_base }}/allocations/{{ __allocation_uuid }}/entitlements?pool={{ __aap_pool_id | urlencode }}&quantity={{ aap_pool_quantity }}
-        method: POST
-        headers:
-          Authorization: "Bearer {{ __rhsm_access_token }}"
-        status_code: [200, 201]
-        return_content: true
-      register: __attach_entitlement
-      no_log: true
-
-    - name: Note when AAP pool already attached on selected allocation
-      when: __aap_pool_id in __attached_pool_ids
-      ansible.builtin.debug:
-        msg: "Pool {{ __aap_pool_id }} already attached to allocation {{ __allocation_uuid }}"
+      Using SCA allocation "{{ __allocation_display_name | default(allocation_name) }}"
+      ({{ __allocation_uuid }}) for manifest export.
 
 - name: Trigger manifest export
   ansible.builtin.uri:

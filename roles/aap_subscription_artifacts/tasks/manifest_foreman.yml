@@ -1,7 +1,6 @@
 ---
-# Download via theforeman.foreman.redhat_manifest.
-# Default behavior: find an existing allocation and export its manifest.
-# Pool attach / allocation create are opt-in.
+# Download via theforeman.foreman.redhat_manifest (SCA / org_environment).
+# Discover or create allocation via RHSM, then export — no pool attach.
 
 - name: Assert Red Hat portal credentials for foreman backend
   ansible.builtin.assert:
@@ -32,7 +31,7 @@
 - name: Show allocation selection
   ansible.builtin.debug:
     msg: >-
-      Downloading manifest for allocation
+      Downloading SCA manifest for allocation
       "{{ __allocation_display_name | default(allocation_name) }}"
       ({{ __allocation_uuid }}).
 
@@ -40,26 +39,7 @@
   ansible.builtin.include_tasks: ensure_rhsm_ca.yml
   when: foreman_validate_certs | bool
 
-- name: Attach AAP pool before download when requested
-  when: ensure_aap_pool | bool
-  block:
-    - name: Resolve AAP pool id
-      ansible.builtin.include_tasks: resolve_aap_pool.yml
-
-    - name: Attach AAP pool and download manifest via theforeman.foreman
-      theforeman.foreman.redhat_manifest:
-        uuid: "{{ __allocation_uuid }}"
-        username: "{{ rh_username }}"
-        password: "{{ rh_password }}"
-        pool_id: "{{ __aap_pool_id }}"
-        quantity: "{{ aap_pool_quantity }}"
-        path: "{{ __aap_artifacts_dir }}/{{ manifest_filename }}"
-        content_access_mode: org_environment
-        validate_certs: "{{ foreman_validate_certs }}"
-      no_log: true
-
-- name: Download existing allocation manifest via theforeman.foreman
-  when: not (ensure_aap_pool | bool)
+- name: Download allocation manifest via theforeman.foreman
   theforeman.foreman.redhat_manifest:
     uuid: "{{ __allocation_uuid }}"
     username: "{{ rh_username }}"

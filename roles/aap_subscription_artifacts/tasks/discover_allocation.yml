@@ -1,9 +1,7 @@
 ---
-# List/probe allocations and select one to download.
-# Preference: allocation_uuid override → AAP-entitled (named preferred) →
-# named allocation → sole existing allocation.
-# Sets: __selected_allocation, __allocation_uuid, __reuse_existing_aap,
-#       __aap_already_attached, __allocation_choices
+# List allocations and select one to download (SCA: no pool attach).
+# Preference: allocation_uuid → allocation_name → sole existing allocation.
+# Sets: __selected_allocation, __allocation_uuid, __allocation_choices
 
 - name: List subscription allocations
   ansible.builtin.uri:
@@ -18,110 +16,11 @@
 - name: Build public allocation choices (name + uuid)
   ansible.builtin.set_fact:
     __allocation_choices: "{{ __allocations_list.json.body | default([]) | json_query('[].{name: name, uuid: uuid}') }}"
-
-- name: Probe allocations for attached entitlements
-  when:
-    - reuse_existing_aap_allocation | bool
-    - (__allocations_list.json.body | default([]) | length) > 0
-  ansible.builtin.uri:
-    url: "{{ rhsm_api_base }}/allocations/{{ item.uuid }}?include=entitlements"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ __rhsm_access_token }}"
-    return_content: true
-  loop: "{{ __allocations_list.json.body | default([]) }}"
-  loop_control:
-    label: "{{ item.name | default(item.uuid) }}"
-  register: __allocation_probes
-  no_log: true
-
-- name: Initialize selection state
-  ansible.builtin.set_fact:
-    __aap_entitled_allocations: []
-    __reuse_existing_aap: false
-    __aap_already_attached: false
     __selected_allocation: {}
 
-- name: Collect allocations that already have an AAP subscription
+- name: Prefer allocation with matching name
   when:
-    - reuse_existing_aap_allocation | bool
-    - __allocation_probes is defined
-    - __allocation_probes.results is defined
-  block:
-    - name: Add AAP-entitled allocation candidates
-      vars:
-        __ents: >-
-          {{
-            item.json.body.entitlementsAttached.value
-            | default(item.json.body.entitlementsAttached, true)
-            | default(item.json.body.entitlements, true)
-            | default([], true)
-          }}
-        __name_matches: >-
-          {{
-            __ents
-            | selectattr('productName', 'defined')
-            | selectattr('productName', 'match', aap_pool_name_regex)
-            | list
-            + (
-              __ents
-              | selectattr('name', 'defined')
-              | selectattr('name', 'match', aap_pool_name_regex)
-              | list
-            )
-            + (
-              __ents
-              | selectattr('poolName', 'defined')
-              | selectattr('poolName', 'match', aap_pool_name_regex)
-              | list
-            )
-          }}
-        __pool_id_matches: >-
-          {{
-            (
-              __ents
-              | selectattr('poolId', 'defined')
-              | selectattr('poolId', 'equalto', aap_pool_id)
-              | list
-            )
-            if (aap_pool_id | length > 0)
-            else []
-          }}
-        # Also treat any allocation with attached entitlements as reusable
-        # when entitlement product fields are absent (SCA / sparse payloads).
-        __any_entitlements: "{{ __ents | length > 0 }}"
-      ansible.builtin.set_fact:
-        __aap_entitled_allocations: "{{ __aap_entitled_allocations + [item.json.body] }}"
-      loop: "{{ __allocation_probes.results }}"
-      loop_control:
-        label: "{{ item.json.body.name | default(item.item.uuid | default('unknown')) }}"
-      when:
-        - item is not skipped
-        - item is not failed
-        - item.json is defined
-        - item.json.body is defined
-        - (__name_matches | length > 0) or (__pool_id_matches | length > 0)
-
-- name: Prefer named allocation among AAP-entitled candidates
-  when: __aap_entitled_allocations | length > 0
-  ansible.builtin.set_fact:
-    __selected_allocation: >-
-      {{
-        (
-          __aap_entitled_allocations
-          | selectattr('name', 'defined')
-          | selectattr('name', 'equalto', allocation_name)
-          | list
-          | first
-        )
-        | default(__aap_entitled_allocations | first, true)
-      }}
-    __reuse_existing_aap: true
-    __aap_already_attached: true
-
-- name: Fall back to allocation with matching name
-  when:
-    - not (__reuse_existing_aap | bool)
+    - reuse_existing_allocation | bool
     - (__allocations_list.json.body | default([]) | length) > 0
   ansible.builtin.set_fact:
     __selected_allocation: >-
@@ -136,12 +35,11 @@
 
 - name: Fall back to the only existing allocation
   when:
-    - not (__reuse_existing_aap | bool)
+    - reuse_existing_allocation | bool
     - __selected_allocation.uuid is not defined
     - (__allocations_list.json.body | default([]) | length) == 1
   ansible.builtin.set_fact:
     __selected_allocation: "{{ __allocations_list.json.body | first }}"
-    __reuse_existing_aap: true
 
 - name: Set allocation UUID from selection when present
   when: __selected_allocation.uuid is defined
@@ -156,8 +54,6 @@
   ansible.builtin.set_fact:
     __allocation_uuid: "{{ allocation_uuid }}"
     __allocation_display_name: "{{ allocation_name }}"
-    __reuse_existing_aap: true
-    __aap_already_attached: true
 
 - name: Fail clearly when multiple allocations exist and none was selected
   when:
@@ -166,15 +62,14 @@
   ansible.builtin.fail:
     msg: >-
       Found {{ __allocations_list.json.body | length }} existing allocations but
-      none matched allocation_name="{{ allocation_name }}" and none were
-      auto-selected as AAP-entitled. Set allocation_name or allocation_uuid
-      to download an existing manifest (create is not attempted by default).
-      Available: {{ __allocation_choices }}
+      none matched allocation_name="{{ allocation_name }}". Set allocation_name
+      or allocation_uuid to download an existing SCA manifest (create is not
+      attempted by default). Available: {{ __allocation_choices }}
 
 - name: Show allocation discovery result
   when: __allocation_uuid is defined
   ansible.builtin.debug:
     msg: >-
       Selected allocation "{{ __allocation_display_name | default(allocation_name) }}"
-      ({{ __allocation_uuid }}) for manifest download.
+      ({{ __allocation_uuid }}) for SCA manifest download.
       Available allocations: {{ __allocation_choices }}

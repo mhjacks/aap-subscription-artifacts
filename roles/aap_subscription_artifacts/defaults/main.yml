@@ -25,25 +25,18 @@ rhsm_token_url: https://access.redhat.com/management/api
 sso_token_url: https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token
 rhsm_api_base: https://api.access.redhat.com/management/v1
 
-# Allocation / pool
+# Allocation (SCA only — no pool attach)
 allocation_name: aap-local
 # Optional explicit UUID (skips name matching when set)
 allocation_uuid: ""
 # Empty = pick latest version from /allocations/versions
 allocation_version: ""
-# When true, scan/reuse existing allocations and download their manifest.
-reuse_existing_aap_allocation: true
-# When false (default), never create a new allocation — only download existing.
+# Prefer an existing allocation for download when possible
+reuse_existing_allocation: true
+# When false (default), never create a new allocation — only download existing
 create_allocation_if_missing: false
-# SCA mode: enable simpleContentAccess on the allocation (PUT ... simpleContentAccess=enabled).
-# Matches Hybrid Cloud Console manifests — no pool attach required for export.
+# Always enable SCA on the allocation (console-compatible; no pools)
 enable_simple_content_access: true
-# When true, attach/ensure an AAP pool before export (legacy entitlement workflow).
-# Leave false under SCA; the console does not require picking pools either.
-ensure_aap_pool: false
-aap_pool_id: ""
-aap_pool_name_regex: "(?i)ansible.?automation.?platform"
-aap_pool_quantity: 1
 
 export_retries: 30
 export_delay: 10
@@ -54,7 +47,6 @@ rhsm_uep_ca_path: /etc/rhsm/ca/redhat-uep.pem
 rhsm_uep_ca_url: https://raw.githubusercontent.com/Katello/katello/master/ca/redhat-uep.pem
 # Passed to theforeman.foreman.redhat_manifest validate_certs.
 # Default false: modern OpenSSL/Python reject redhat-uep.pem with
-# "Basic Constraints of CA cert not marked critical". The module still
-# hardcodes that CA path when validate_certs=true. Prefer manifest_backend=rhsm_api
+# "Basic Constraints of CA cert not marked critical". Prefer manifest_backend=rhsm_api
 # for verified TLS via api.access.redhat.com (public CAs + offline token).
 foreman_validate_certs: false

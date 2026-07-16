@@ -62,9 +62,6 @@
             | default(__allocation_create.json.body.id)
           }}
         __allocation_display_name: "{{ allocation_name }}"
-        __reuse_existing_aap: false
-        __aap_already_attached: false
-        __allocation_just_created: true
 
 - name: Enable Simple Content Access on the allocation
   when:
