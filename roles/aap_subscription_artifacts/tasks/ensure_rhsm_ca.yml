@@ -1,32 +1,24 @@
 ---
-# theforeman.foreman.redhat_manifest expects /etc/rhsm/ca/redhat-uep.pem
-# (Red Hat Entitlement Platform CA). Install from package when possible,
-# otherwise download a public copy (Katello mirrors the RPM content).
+# theforeman.foreman.redhat_manifest hardcodes REDHAT_UEP=/etc/rhsm/ca/redhat-uep.pem
+# (see upstream redhat_manifest.py). That file is not in public CA bundles; it ships
+# in subscription-manager-rhsm-certificates on RHEL, but we always fetch a public
+# copy so non-RHEL hosts work without that package.
 
 - name: Check for Red Hat Entitlement Platform CA
   ansible.builtin.stat:
     path: "{{ rhsm_uep_ca_path }}"
   register: __rhsm_uep_ca
 
-- name: Install RHSM CA certificates package when available
+- name: Fetch Red Hat Entitlement Platform CA when missing
   when: not __rhsm_uep_ca.stat.exists
   block:
-    - name: Try installing subscription-manager-rhsm-certificates
-      ansible.builtin.package:
-        name: subscription-manager-rhsm-certificates
-        state: present
-      become: true
-      register: __rhsm_ca_pkg
-      failed_when: false
+    - name: Download redhat-uep.pem to artifacts directory
+      ansible.builtin.get_url:
+        url: "{{ rhsm_uep_ca_url }}"
+        dest: "{{ __aap_artifacts_dir }}/redhat-uep.pem"
+        mode: "0644"
+        force: false
 
-    - name: Re-check Red Hat Entitlement Platform CA after package install
-      ansible.builtin.stat:
-        path: "{{ rhsm_uep_ca_path }}"
-      register: __rhsm_uep_ca
-
-- name: Download Red Hat Entitlement Platform CA from public mirror
-  when: not __rhsm_uep_ca.stat.exists
-  block:
     - name: Ensure RHSM CA directory exists
       ansible.builtin.file:
         path: "{{ rhsm_uep_ca_path | dirname }}"
@@ -34,24 +26,36 @@
         mode: "0755"
       become: true
 
-    - name: Fetch redhat-uep.pem
-      ansible.builtin.get_url:
-        url: "{{ rhsm_uep_ca_url }}"
+    - name: Install redhat-uep.pem where theforeman.foreman expects it
+      ansible.builtin.copy:
+        src: "{{ __aap_artifacts_dir }}/redhat-uep.pem"
         dest: "{{ rhsm_uep_ca_path }}"
         mode: "0644"
-        force: false
+        remote_src: true
       become: true
 
-    - name: Confirm Red Hat Entitlement Platform CA is present
+    - name: Re-check Red Hat Entitlement Platform CA
       ansible.builtin.stat:
         path: "{{ rhsm_uep_ca_path }}"
       register: __rhsm_uep_ca
 
 - name: Assert Red Hat Entitlement Platform CA is available
-  ansible.builtin.assert:
-    that:
-      - __rhsm_uep_ca.stat.exists
-    fail_msg: >-
-      Missing {{ rhsm_uep_ca_path }}. Install subscription-manager-rhsm-certificates,
-      or allow the role to download it from {{ rhsm_uep_ca_url }}
-      (requires privilege escalation to write under /etc/rhsm/ca).
+  when: not (foreman_validate_certs | bool) or (__rhsm_uep_ca.stat.exists | bool)
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        'Using ' ~ rhsm_uep_ca_path ~ ' for theforeman portal TLS.'
+        if __rhsm_uep_ca.stat.exists
+        else 'foreman_validate_certs=false; skipping RHSM CA requirement.'
+      }}
+
+- name: Fail when RHSM CA is missing and TLS validation is required
+  when:
+    - foreman_validate_certs | bool
+    - not __rhsm_uep_ca.stat.exists
+  ansible.builtin.fail:
+    msg: >-
+      Missing {{ rhsm_uep_ca_path }}. theforeman.foreman.redhat_manifest hardcodes
+      that path for portal TLS. Re-run with --become so the role can install the
+      public CA from {{ rhsm_uep_ca_url }}, or set foreman_validate_certs=false
+      (not recommended).

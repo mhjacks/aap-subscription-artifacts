@@ -21,7 +21,7 @@ ansible-galaxy collection install -r requirements.yml
 
 You also need `rh_username` / `rh_password` for the Customer Portal.
 
-`theforeman.foreman.redhat_manifest` validates TLS with the Red Hat Entitlement Platform CA at `/etc/rhsm/ca/redhat-uep.pem`. That file ships in the `subscription-manager-rhsm-certificates` RPM. There is no separate Customer Portal download page; a public copy is mirrored by [Katello](https://raw.githubusercontent.com/Katello/katello/master/ca/redhat-uep.pem). The role installs the package when possible, otherwise downloads that PEM (needs `become` to write under `/etc/rhsm/ca`).
+`theforeman.foreman.redhat_manifest` hardcodes TLS validation against `/etc/rhsm/ca/redhat-uep.pem` (Red Hat Entitlement Platform CA). That file normally comes from the RHEL package `subscription-manager-rhsm-certificates`, but there is no requirement to use RHEL: the role downloads a public copy from [Katello's mirror](https://raw.githubusercontent.com/Katello/katello/master/ca/redhat-uep.pem) and installs it to that path (needs `--become`). Override with `rhsm_uep_ca_url` if you prefer another source.
 
 ## Quick start
 

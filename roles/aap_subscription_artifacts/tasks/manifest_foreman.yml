@@ -54,7 +54,7 @@
         quantity: "{{ aap_pool_quantity }}"
         path: "{{ __aap_artifacts_dir }}/{{ manifest_filename }}"
         content_access_mode: org_environment
-        validate_certs: true
+        validate_certs: "{{ foreman_validate_certs }}"
       no_log: true
 
 - name: Download existing allocation manifest via theforeman.foreman
@@ -65,7 +65,7 @@
     password: "{{ rh_password }}"
     path: "{{ __aap_artifacts_dir }}/{{ manifest_filename }}"
     content_access_mode: org_environment
-    validate_certs: true
+    validate_certs: "{{ foreman_validate_certs }}"
   no_log: true
 
 - name: Note foreman download complete

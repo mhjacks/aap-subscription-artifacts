@@ -45,7 +45,9 @@ aap_pool_quantity: 1
 export_retries: 30
 export_delay: 10
 
-# Required by theforeman.foreman.redhat_manifest for portal TLS
+# Required by theforeman.foreman.redhat_manifest for portal TLS (hardcoded path)
 rhsm_uep_ca_path: /etc/rhsm/ca/redhat-uep.pem
-# Public mirror of the cert shipped in subscription-manager-rhsm-certificates
+# Public copy of the cert from subscription-manager-rhsm-certificates (no RHEL package needed)
 rhsm_uep_ca_url: https://raw.githubusercontent.com/Katello/katello/master/ca/redhat-uep.pem
+# Passed to theforeman.foreman.redhat_manifest validate_certs
+foreman_validate_certs: true
