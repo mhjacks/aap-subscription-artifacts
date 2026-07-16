@@ -1,0 +1,80 @@
+---
+# Download (and optionally create/attach) via theforeman.foreman.redhat_manifest.
+# When an offline token is available, discover an existing AAP-entitled allocation
+# first and export that UUID.
+
+- name: Assert Red Hat portal credentials for foreman backend
+  ansible.builtin.assert:
+    that:
+      - rh_username is defined
+      - rh_username | length > 0
+      - rh_password is defined
+      - rh_password | length > 0
+    fail_msg: >-
+      manifest_backend=foreman requires rh_username and rh_password
+      (theforeman.foreman.redhat_manifest authenticates to the Customer Portal).
+
+- name: Discover existing allocations via RHSM when authenticated
+  ansible.builtin.include_tasks: discover_allocation.yml
+  when: __rhsm_access_token is defined
+
+- name: Download existing manifest by UUID via theforeman.foreman
+  when: __allocation_uuid is defined
+  theforeman.foreman.redhat_manifest:
+    uuid: "{{ __allocation_uuid }}"
+    username: "{{ rh_username }}"
+    password: "{{ rh_password }}"
+    path: "{{ __aap_artifacts_dir }}/{{ manifest_filename }}"
+    content_access_mode: org_environment
+    validate_certs: true
+  no_log: true
+
+- name: Ensure pool quantity on existing UUID when aap_pool_id is set
+  when:
+    - __allocation_uuid is defined
+    - aap_pool_id | length > 0
+  theforeman.foreman.redhat_manifest:
+    uuid: "{{ __allocation_uuid }}"
+    username: "{{ rh_username }}"
+    password: "{{ rh_password }}"
+    pool_id: "{{ aap_pool_id }}"
+    quantity: "{{ aap_pool_quantity }}"
+    path: "{{ __aap_artifacts_dir }}/{{ manifest_filename }}"
+    content_access_mode: org_environment
+    validate_certs: true
+  no_log: true
+
+- name: Create or update named manifest and download via theforeman.foreman
+  when: __allocation_uuid is not defined
+  block:
+    - name: Assert AAP pool id when creating via theforeman.foreman
+      ansible.builtin.assert:
+        that:
+          - aap_pool_id | length > 0
+        fail_msg: >-
+          No existing AAP-entitled allocation was found, so
+          theforeman.foreman.redhat_manifest needs aap_pool_id to create/attach
+          allocation "{{ allocation_name }}".
+
+    - name: Ensure named manifest has AAP pool and export zip
+      theforeman.foreman.redhat_manifest:
+        name: "{{ allocation_name }}"
+        username: "{{ rh_username }}"
+        password: "{{ rh_password }}"
+        pool_id: "{{ aap_pool_id }}"
+        quantity: "{{ aap_pool_quantity }}"
+        path: "{{ __aap_artifacts_dir }}/{{ manifest_filename }}"
+        content_access_mode: org_environment
+        validate_certs: true
+      no_log: true
+
+- name: Note foreman download complete
+  ansible.builtin.debug:
+    msg: >-
+      Wrote manifest via theforeman.foreman.redhat_manifest to
+      {{ __aap_artifacts_dir }}/{{ manifest_filename }}
+      {{
+        '(uuid ' ~ __allocation_uuid ~ ')'
+        if (__allocation_uuid is defined)
+        else '(name ' ~ allocation_name ~ ')'
+      }}.

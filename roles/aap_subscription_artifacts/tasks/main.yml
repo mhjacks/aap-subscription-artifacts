@@ -40,11 +40,11 @@
 
     - name: Obtain subscription manifest via RHSM API
       ansible.builtin.include_tasks: manifest.yml
-      when: manifest_backend != 'satellite_module'
+      when: manifest_backend not in ['foreman', 'satellite_module']
 
-    - name: Obtain subscription manifest via redhat.satellite
-      ansible.builtin.include_tasks: manifest_satellite.yml
-      when: manifest_backend == 'satellite_module'
+    - name: Obtain subscription manifest via theforeman.foreman
+      ansible.builtin.include_tasks: manifest_foreman.yml
+      when: manifest_backend in ['foreman', 'satellite_module']
 
     - name: Write Automation Hub token file
       ansible.builtin.include_tasks: hub_token.yml

@@ -13,11 +13,13 @@ Artifacts are written under `~/Documents/aap-subscription-artifacts/` by default
 - Network access to `sso.redhat.com` and `api.access.redhat.com`
 - A Red Hat account with an Ansible Automation Platform subscription
 
-Optional (only for `manifest_backend: satellite_module`):
+When using `manifest_backend: foreman` (download via `theforeman.foreman.redhat_manifest`):
 
 ```bash
 ansible-galaxy collection install -r requirements.yml
 ```
+
+You also need `rh_username` / `rh_password` for the Customer Portal.
 
 ## Quick start
 
@@ -63,6 +65,19 @@ Fetch will:
 
 Set `reuse_existing_aap_allocation: false` to skip the scan and always use the named allocation create/attach path.
 
+### Download via `theforeman.foreman`
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+ansible-playbook playbooks/fetch_artifacts.yml \
+  -e manifest_backend=foreman \
+  -e rh_username=YOUR_RH_USER \
+  -e rh_password=YOUR_RH_PASSWORD \
+  -e @creds.yml
+```
+
+With an offline token present, the role still discovers an existing AAP-entitled allocation over the RHSM API, then downloads it with `theforeman.foreman.redhat_manifest` (uuid + portal credentials). If none exists, pass `aap_pool_id` so the module can create/attach `allocation_name` and export the zip.
+
 ### One-shot (generate + fetch)
 
 ```bash
@@ -82,15 +97,16 @@ ansible-playbook playbooks/fetch_artifacts.yml -e @creds.yml
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `rh_offline_token` | (file) | Offline token; falls back to `rh-offline-token` file |
-| `rh_username` / `rh_password` | unset | Password-grant generate attempt; required for `satellite_module` |
+| `rh_username` / `rh_password` | unset | Password-grant generate; **required** for `manifest_backend=foreman` |
 | `artifacts_dir` | `~/Documents/aap-subscription-artifacts` | Output directory |
 | `allocation_name` | `aap-local` | Preferred allocation name (create target / preference among AAP-entitled) |
-| `allocation_version` | latest from API | Satellite version for new allocations |
+| `allocation_uuid` | unset | Explicit allocation UUID to export |
+| `allocation_version` | latest from API | Satellite version for new allocations (RHSM API backend) |
 | `reuse_existing_aap_allocation` | `true` | Reuse any existing allocation that already has AAP attached |
-| `aap_pool_id` | unset | Explicit pool id (skips name matching) |
+| `aap_pool_id` | unset | Explicit pool id (required for foreman create path) |
 | `aap_pool_name_regex` | `(?i)ansible.?automation.?platform` | Pool product name match |
 | `aap_pool_quantity` | `1` | Quantity to attach |
-| `manifest_backend` | `rhsm_api` | `rhsm_api` or `satellite_module` |
+| `manifest_backend` | `rhsm_api` | `rhsm_api` or `foreman` (`satellite_module` alias) |
 | `open_token_urls` | `true` | Open browser during interactive generate |
 
 ## Outputs
