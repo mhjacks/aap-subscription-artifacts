@@ -1,0 +1,33 @@
+---
+namespace: rhvp
+name: aap_subscription_artifacts
+version: 1.0.0
+readme: README.md
+authors:
+  - Martin Jackson <mhjacks@redhat.com>
+description: >
+  Obtain an Ansible Automation Platform subscription manifest zip and
+  Automation Hub offline token for local use.
+license_file: LICENSE
+tags:
+  - aap
+  - ansible
+  - redhat
+  - subscription
+  - hub
+  - infrastructure
+dependencies:
+  theforeman.foreman: ">=3.8.0"
+repository: https://github.com/mhjacks/aap-subscription-artifacts
+documentation: https://github.com/mhjacks/aap-subscription-artifacts
+homepage: https://github.com/mhjacks/aap-subscription-artifacts
+issues: https://github.com/mhjacks/aap-subscription-artifacts/issues
+build_ignore:
+  - .ansible
+  - .git
+  - .gitignore
+  - "*.tar.gz"
+  - collections
+  - inventory/group_vars/all.yml
+  - creds.yml
+  - artifacts

@@ -1,6 +1,9 @@
 ---
-# Always needed when creating an SCA allocation (portal path) or using
-# manifest_backend=foreman. Safe to install even for rhsm_api-only download.
+# Install this collection (editable/local) plus its dependencies:
+#   ansible-galaxy collection install -r requirements.yml -p ./collections
+#   ansible-galaxy collection install -f -p ./collections .
 collections:
   - name: theforeman.foreman
     version: ">=3.8.0"
+  - name: .
+    type: dir

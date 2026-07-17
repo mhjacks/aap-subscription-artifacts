@@ -4,6 +4,6 @@
   connection: local
   gather_facts: false
   roles:
-    - role: aap_subscription_artifacts
+    - role: rhvp.aap_subscription_artifacts.aap_subscription_artifacts
       vars:
         aap_artifacts_action: all

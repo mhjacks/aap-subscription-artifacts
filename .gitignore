@@ -6,12 +6,13 @@ creds.yml
 .vault_pass
 .vault_password
 
-# Downloaded / generated artifacts (also under Documents by default)
+# Downloaded / generated artifacts
 artifacts/
 **/aap-manifest.zip
 **/rh-offline-token
 **/automation-hub-token
 *.zip
+*.tar.gz
 
 # Ansible
 *.retry
